@@ -1,13 +1,15 @@
 const blockedYoutube=['youtube.com','youtu.be','youtube-nocookie.com','googlevideo.com'];
 const hostIs=(host,domain)=>host===domain||host.endsWith(`.${domain}`);
+function youtubeVideoId(url){if(hostIs(url.hostname,'youtu.be')){const id=url.pathname.split('/').filter(Boolean)[0]||'';return /^[\w-]{11}$/.test(id)?id:null;}if(!hostIs(url.hostname,'youtube.com'))return null;const id=url.searchParams.get('v')||url.pathname.match(/^\/(?:shorts|live|embed)\/([\w-]{11})/)?.[1]||'';return /^[\w-]{11}$/.test(id)?id:null;}
 export function validateSourceLink(value){
   let url;try{url=new URL(String(value||'').trim());}catch{return {error:'Paste a complete HTTPS video link.'};}
   if(url.protocol!=='https:'||url.username||url.password)return {error:'Use a public HTTPS video link without embedded login credentials.'};
-  if(blockedYoutube.some(host=>hostIs(url.hostname,host)))return {error:'YouTube watch links cannot be downloaded by this importer. YouTube API policies prohibit downloading/importing audiovisual copies without prior written approval. Export a video you own from YouTube Studio and upload it, or provide a separately stored authorized source file.'};
+  if(blockedYoutube.some(host=>hostIs(url.hostname,host))){const videoId=youtubeVideoId(url);if(videoId)return {url,provider:'youtube_portability',videoId};return {error:'Paste a YouTube video link with a valid video ID. Import is available only for videos owned by the connected Google account using Google Data Portability API.'};}
   if(hostIs(url.hostname,'twitch.tv')||hostIs(url.hostname,'clips.twitch.tv')){
     const clipSlug=hostIs(url.hostname,'clips.twitch.tv')?url.pathname.split('/').filter(Boolean)[0]:url.pathname.match(/^\/[^/]+\/clip\/([^/]+)/i)?.[1];
     if(clipSlug&&/^[\w-]{3,100}$/.test(clipSlug))return {url,provider:'twitch_clip',clipSlug};
-    return {error:'Only Twitch Clip links are supported. Twitch VOD/watch links do not provide full-VOD download access; connect a Twitch account with clip permissions, or send your own stream to this app with OBS.'};
+    const vodId=url.pathname.match(/^\/videos\/(\d+)/i)?.[1];if(vodId)return {url,provider:'twitch_vod',videoId:vodId};
+    return {error:'Use a Twitch Clip link or a Twitch VOD URL in the form twitch.tv/videos/VIDEO_ID. VOD links can create an authorized 5–60 second segment at a time; full VOD file import is not available through Twitch APIs.'};
   }
   if(hostIs(url.hostname,'drive.google.com')||hostIs(url.hostname,'docs.google.com')){
     const id=url.pathname.match(/\/file\/d\/([^/]+)/)?.[1]||url.searchParams.get('id');

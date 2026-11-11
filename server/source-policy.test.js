@@ -4,18 +4,24 @@ import { isPublicAddress, validateSourceLink } from './source-policy.js';
 
 test('direct HTTPS media links are accepted, while page links get accurate provider guidance', () => {
   assert.equal(validateSourceLink('https://media.example.com/source.mp4').error, undefined);
-  assert.match(validateSourceLink('https://youtube.com/watch?v=abc').error, /prior written approval/);
-  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error, /Only Twitch Clip links/);
+  assert.equal(validateSourceLink('https://youtube.com/watch?v=abcdefghijk').provider,'youtube_portability');
+  assert.equal(validateSourceLink('https://www.twitch.tv/videos/123').provider,'twitch_vod');
   assert.match(validateSourceLink('http://media.example.com/source.mp4').error, /HTTPS/);
 });
 
-test('Twitch clip URLs are accepted while channel and VOD pages are rejected',()=>{
+test('YouTube video ids are extracted only from supported video URL forms',()=>{
+  assert.equal(validateSourceLink('https://youtu.be/abcdefghijk?t=90').videoId,'abcdefghijk');
+  assert.equal(validateSourceLink('https://www.youtube.com/shorts/abcdefghijk').videoId,'abcdefghijk');
+  assert.ok(validateSourceLink('https://youtube.com/channel/abc').error);
+});
+
+test('Twitch clip and VOD URLs are classified while channel pages are rejected',()=>{
   const embedded=validateSourceLink('https://clips.twitch.tv/FastHelpfulClipSlug');
   assert.equal(embedded.provider,'twitch_clip');assert.equal(embedded.clipSlug,'FastHelpfulClipSlug');
   const channel=validateSourceLink('https://www.twitch.tv/somecreator/clip/FastHelpfulClipSlug?filter=clips&range=7d');
   assert.equal(channel.provider,'twitch_clip');assert.equal(channel.clipSlug,'FastHelpfulClipSlug');
-  assert.match(validateSourceLink('https://www.twitch.tv/somecreator').error,/Only Twitch Clip links/);
-  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error,/Only Twitch Clip links/);
+  assert.match(validateSourceLink('https://www.twitch.tv/somecreator').error,/Use a Twitch Clip link/);
+  assert.equal(validateSourceLink('https://www.twitch.tv/videos/123').videoId,'123');
 });
 
 test('Google Drive and Dropbox shared file URLs are normalized to download responses',()=>{
