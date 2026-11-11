@@ -4,9 +4,20 @@ import { isPublicAddress, validateSourceLink } from './source-policy.js';
 
 test('direct HTTPS media links are accepted, while page links get accurate provider guidance', () => {
   assert.equal(validateSourceLink('https://media.example.com/source.mp4').error, undefined);
-  assert.match(validateSourceLink('https://youtube.com/watch?v=abc').error, /official API/);
-  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error, /Video Producer/);
+  assert.match(validateSourceLink('https://youtube.com/watch?v=abc').error, /prior written approval/);
+  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error, /authorized Twitch clips integration/);
   assert.match(validateSourceLink('http://media.example.com/source.mp4').error, /HTTPS/);
+});
+
+test('Google Drive and Dropbox shared file URLs are normalized to download responses',()=>{
+  const drive=validateSourceLink('https://drive.google.com/file/d/drive-file-123/view?usp=sharing');
+  assert.equal(drive.provider,'google_drive');
+  assert.equal(drive.url.hostname,'drive.google.com');
+  assert.equal(drive.url.pathname,'/uc');
+  assert.equal(drive.url.searchParams.get('id'),'drive-file-123');
+  const dropbox=validateSourceLink('https://www.dropbox.com/scl/fi/abc/video.mp4?rlkey=secret&dl=0');
+  assert.equal(dropbox.provider,'dropbox');
+  assert.equal(dropbox.url.searchParams.get('dl'),'1');
 });
 
 test('URL credentials and malformed URLs are rejected', () => {

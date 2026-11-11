@@ -3,9 +3,16 @@ const hostIs=(host,domain)=>host===domain||host.endsWith(`.${domain}`);
 export function validateSourceLink(value){
   let url;try{url=new URL(String(value||'').trim());}catch{return {error:'Paste a complete HTTPS video link.'};}
   if(url.protocol!=='https:'||url.username||url.password)return {error:'Use a public HTTPS video link without embedded login credentials.'};
-  if(blockedYoutube.some(host=>hostIs(url.hostname,host)))return {error:'YouTube page links cannot provide source media through the official API. Upload a source file that you are authorized to use.'};
-  if(hostIs(url.hostname,'twitch.tv'))return {error:'Twitch page links do not expose full VOD files to this importer. Download your own VOD in Twitch Video Producer, then upload it. Twitch clip downloads can be added through an authorized account connection.'};
-  return {url};
+  if(blockedYoutube.some(host=>hostIs(url.hostname,host)))return {error:'YouTube watch links cannot be downloaded by this importer. YouTube API policies prohibit downloading/importing audiovisual copies without prior written approval. Export a video you own from YouTube Studio and upload it, or provide a separately stored authorized source file.'};
+  if(hostIs(url.hostname,'twitch.tv')||hostIs(url.hostname,'clips.twitch.tv'))return {error:'Twitch watch and clip pages need the authorized Twitch clips integration, which is not configured yet. Full VOD download links are not provided by the VOD API.'};
+  if(hostIs(url.hostname,'drive.google.com')||hostIs(url.hostname,'docs.google.com')){
+    const id=url.pathname.match(/\/file\/d\/([^/]+)/)?.[1]||url.searchParams.get('id');
+    if(!id)return {error:'Use a Google Drive file link in the form drive.google.com/file/d/FILE_ID/view and grant this account link access.'};
+    url=new URL('https://drive.google.com/uc');url.searchParams.set('export','download');url.searchParams.set('id',id);
+  }else if(hostIs(url.hostname,'dropbox.com')){
+    url.searchParams.set('dl','1');
+  }
+  return {url,provider:hostIs(url.hostname,'drive.google.com')?'google_drive':hostIs(url.hostname,'dropbox.com')?'dropbox':'direct'};
 }
 
 export function isPublicAddress(address) {
