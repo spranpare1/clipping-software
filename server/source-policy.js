@@ -4,7 +4,11 @@ export function validateSourceLink(value){
   let url;try{url=new URL(String(value||'').trim());}catch{return {error:'Paste a complete HTTPS video link.'};}
   if(url.protocol!=='https:'||url.username||url.password)return {error:'Use a public HTTPS video link without embedded login credentials.'};
   if(blockedYoutube.some(host=>hostIs(url.hostname,host)))return {error:'YouTube watch links cannot be downloaded by this importer. YouTube API policies prohibit downloading/importing audiovisual copies without prior written approval. Export a video you own from YouTube Studio and upload it, or provide a separately stored authorized source file.'};
-  if(hostIs(url.hostname,'twitch.tv')||hostIs(url.hostname,'clips.twitch.tv'))return {error:'Twitch watch and clip pages need the authorized Twitch clips integration, which is not configured yet. Full VOD download links are not provided by the VOD API.'};
+  if(hostIs(url.hostname,'twitch.tv')||hostIs(url.hostname,'clips.twitch.tv')){
+    const clipSlug=hostIs(url.hostname,'clips.twitch.tv')?url.pathname.split('/').filter(Boolean)[0]:url.pathname.match(/^\/[^/]+\/clip\/([^/]+)/i)?.[1];
+    if(clipSlug&&/^[\w-]{3,100}$/.test(clipSlug))return {url,provider:'twitch_clip',clipSlug};
+    return {error:'Only Twitch Clip links are supported. Twitch VOD/watch links do not provide full-VOD download access; connect a Twitch account with clip permissions, or send your own stream to this app with OBS.'};
+  }
   if(hostIs(url.hostname,'drive.google.com')||hostIs(url.hostname,'docs.google.com')){
     const id=url.pathname.match(/\/file\/d\/([^/]+)/)?.[1]||url.searchParams.get('id');
     if(!id)return {error:'Use a Google Drive file link in the form drive.google.com/file/d/FILE_ID/view and grant this account link access.'};

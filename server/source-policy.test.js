@@ -5,8 +5,17 @@ import { isPublicAddress, validateSourceLink } from './source-policy.js';
 test('direct HTTPS media links are accepted, while page links get accurate provider guidance', () => {
   assert.equal(validateSourceLink('https://media.example.com/source.mp4').error, undefined);
   assert.match(validateSourceLink('https://youtube.com/watch?v=abc').error, /prior written approval/);
-  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error, /authorized Twitch clips integration/);
+  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error, /Only Twitch Clip links/);
   assert.match(validateSourceLink('http://media.example.com/source.mp4').error, /HTTPS/);
+});
+
+test('Twitch clip URLs are accepted while channel and VOD pages are rejected',()=>{
+  const embedded=validateSourceLink('https://clips.twitch.tv/FastHelpfulClipSlug');
+  assert.equal(embedded.provider,'twitch_clip');assert.equal(embedded.clipSlug,'FastHelpfulClipSlug');
+  const channel=validateSourceLink('https://www.twitch.tv/somecreator/clip/FastHelpfulClipSlug?filter=clips&range=7d');
+  assert.equal(channel.provider,'twitch_clip');assert.equal(channel.clipSlug,'FastHelpfulClipSlug');
+  assert.match(validateSourceLink('https://www.twitch.tv/somecreator').error,/Only Twitch Clip links/);
+  assert.match(validateSourceLink('https://www.twitch.tv/videos/123').error,/Only Twitch Clip links/);
 });
 
 test('Google Drive and Dropbox shared file URLs are normalized to download responses',()=>{
