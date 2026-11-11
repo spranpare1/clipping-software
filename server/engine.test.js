@@ -34,6 +34,14 @@ test('scene-dense source intervals rank ahead of fallback intervals', () => {
   assert.ok(dense.score > Math.max(...clips.filter(c => c !== dense).map(c => c.score)));
 });
 
+test('audio energy contributes a visible, non-predictive editorial ranking signal', () => {
+  const energy=Array.from({length:600},(_,second)=>second>=300?-8:-55);
+  const clips=selectMoments(600,'3',35,{audioEnergy:energy});
+  assert.equal(clips.length,3);
+  assert.ok(clips.some(c=>c.start>=300));
+  assert.ok(clips.every(c=>Number.isFinite(c.energyMean)));
+});
+
 test('all supported aspect ratios render inside a correctly sized padded canvas', () => {
   assert.match(aspectFilter('9:16'), /pad=1080:1920/);
   assert.match(aspectFilter('1:1'), /pad=1080:1080/);
