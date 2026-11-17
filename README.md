@@ -2,6 +2,8 @@
 
 The primary project in this repository is now **Stream Clipper**: a local-first app for watching up to five streams captured in OBS, scoring chat/audio moments, and saving replay clips for review. The earlier Splice Studio upload/import application is preserved in [`legacy/splice-studio/`](legacy/splice-studio/).
 
+**New to the app?** Follow the [plain-English Windows quick-start guide](QUICK_START_WINDOWS.md) to install it, connect OBS, make a test clip, and optionally enable live speech cues.
+
 ## Current implementation
 
 - Five persistent agent slots with per-agent stream labels, chat configuration, replay settings, and activity history. All agents use one shared clip-criteria profile; edit it once in the dashboard to update all five.
