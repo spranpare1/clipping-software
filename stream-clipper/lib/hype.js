@@ -21,13 +21,22 @@ export class HypeMeter {
     const unique = new Set(current.map((event) => event.user).filter(Boolean)).size;
     const hype = current.filter((event) => /([A-Z]{3,}|!{2,}|\?{2,}|[😂🤣😭🔥💀👏]|\blol\b|\blmao\b)/u.test(event.text)).length;
     const rate = current.length / (this.windowMs / 1000);
+    const normalized = current.map((event) => event.text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').trim()).filter(Boolean);
+    const repeated = Math.max(0, ...[...new Set(normalized)].map((text) => normalized.filter((value) => value === text).length));
+    const vote = [...new Set(normalized)].find((text) => /^(1|2|3|4|5|a|b|c|d|yes|no|left|right|one|two|three)$/i.test(text) && normalized.filter((value) => value === text).length >= Math.max(3, Math.floor(this.minMessages * 0.4)));
     if (baseline >= 1 && current.length < baseline * this.multiplier) return null;
     if (unique < Math.max(3, Math.floor(this.minMessages * 0.4))) return null;
     this.lastTrigger = at;
+    const triggerTypes = ['chat_activity'];
+    if (hype >= Math.ceil(current.length * 0.5)) triggerTypes.push('chat_emote_spam');
+    if (repeated >= Math.max(3, Math.floor(this.minMessages * 0.4))) triggerTypes.push('chat_repetition');
     return {
-      reason: `${current.length} chat messages from ${unique} people in ${Math.round(this.windowMs / 1000)}s${baseline >= 1 ? ` (${(current.length / baseline).toFixed(1)}× recent baseline)` : ''}; ${hype} high-energy reactions.`,
+      reason: `${current.length} chat messages from ${unique} people in ${Math.round(this.windowMs / 1000)}s${baseline >= 1 ? ` (${(current.length / baseline).toFixed(1)}× recent baseline)` : ''}; ${hype} high-energy reactions${vote ? `; repeated vote reply “${vote}”` : ''}.`,
       count: current.length,
       unique,
+      repeated,
+      voteReply: vote || null,
+      triggerTypes,
       ratePerSecond: Number(rate.toFixed(2))
     };
   }

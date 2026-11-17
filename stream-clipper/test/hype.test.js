@@ -28,3 +28,12 @@ test('requires a minimum set of unique chatters', () => {
   for (let i = 0; i < 10; i++) signal = meter.add({ id: `m${i}`, user: i < 2 ? 'same-user' : 'another-user', text: 'lol', at: 1000 + i * 50 });
   assert.equal(signal, null);
 });
+
+test('recognizes repeated short vote replies during an active chat burst', () => {
+  const meter = new HypeMeter({ windowSeconds: 20, minMessages: 4, cooldownSeconds: 0 });
+  let signal;
+  for (let i = 0; i < 4; i++) signal = meter.add({ id: `vote${i}`, user: `voter${i}`, text: '1', at: 2000 + i * 50 });
+  assert.ok(signal);
+  assert.equal(signal.voteReply, '1');
+  assert.ok(signal.triggerTypes.includes('chat_repetition'));
+});

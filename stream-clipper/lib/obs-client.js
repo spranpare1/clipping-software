@@ -36,8 +36,8 @@ export class ObsClient {
             const auth = msg.d.authentication ? createHash('sha256').update(
               createHash('sha256').update(this.password + msg.d.authentication.salt).digest('base64') + msg.d.authentication.challenge
             ).digest('base64') : undefined;
-            // General (1) plus Outputs (64), which includes ReplayBufferSaved.
-            socket.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, eventSubscriptions: 64 | 1, ...(auth ? { authentication: auth } : {}) } }));
+            // General (1), Inputs (8), Outputs (64), and high-volume InputVolumeMeters (65536).
+            socket.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, eventSubscriptions: 1 | 8 | 64 | 65536, ...(auth ? { authentication: auth } : {}) } }));
           } catch (error) { clearTimeout(timeout); reject(error); }
         } else if (msg.op === 2) {
           clearTimeout(timeout);

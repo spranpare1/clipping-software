@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { ObsClient } from './lib/obs-client.js';
 import { HypeMeter } from './lib/hype.js';
+import { AudioPeakDetector, MomentScorer } from './lib/moments.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(ROOT, 'data');
@@ -20,21 +21,29 @@ if (fsSync.existsSync(path.join(ROOT, '.env'))) {
 }
 const CONFIG_PATH = path.join(DATA, 'agents.json');
 const CLIPS_PATH = path.join(DATA, 'clips.json');
+const DEFAULT_CRITERIA = 'Target about 3 minutes. Include buildup, the main event, and the streamer/chat reaction. Prioritize streamer clip requests, polls and audience decisions, strong emotional reactions, chat spikes, emote spam, and repeated messages. Capture context and complete dialogue. Give extra priority when multiple independent signals overlap.';
 const defaultAgents = Array.from({ length: 5 }, (_, i) => ({
-  id: `agent-${i + 1}`, name: `Clipper ${i + 1}`, enabled: i === 0, criteria: '', sourceName: '', obsHost: i === 0 ? (process.env.OBS_HOST || '127.0.0.1') : '127.0.0.1', obsPort: i === 0 ? Number(process.env.OBS_PORT || 4455) : 4455 + i,
-  twitchChannel: '', youtubeLiveChatId: '', autoSaveHype: false, minMessages: 8, windowSeconds: 20, multiplier: 2.5, cooldownSeconds: 90, preRollSeconds: 30
+  id: `agent-${i + 1}`, name: `Clipper ${i + 1}`, enabled: i === 0, criteria: DEFAULT_CRITERIA, sourceName: '', obsHost: i === 0 ? (process.env.OBS_HOST || '127.0.0.1') : '127.0.0.1', obsPort: i === 0 ? Number(process.env.OBS_PORT || 4455) : 4455 + i,
+  twitchChannel: '', youtubeLiveChatId: '', autoSaveHype: false, minMessages: 8, windowSeconds: 20, multiplier: 2.5, cooldownSeconds: 90,
+  clipDurationSeconds: 180, postRollSeconds: 20, audioInputName: '', audioPeakDb: -8
 }));
 let agents = defaultAgents;
 let clips = [];
-try { agents = JSON.parse(await fs.readFile(CONFIG_PATH, 'utf8')); } catch {}
+try {
+  const savedAgents = JSON.parse(await fs.readFile(CONFIG_PATH, 'utf8'));
+  agents = defaultAgents.map((defaults) => {
+    const saved = savedAgents.find((item) => item.id === defaults.id) || {};
+    return { ...defaults, ...saved, criteria: saved.criteria?.trim() ? saved.criteria : defaults.criteria };
+  });
+} catch {}
 try { clips = JSON.parse(await fs.readFile(CLIPS_PATH, 'utf8')); } catch {}
 const runtime = new Map();
 let twitchReconnectTimer = null;
 for (const agent of agents) runtime.set(agent.id, {
   obs: null, password: process.env[`OBS_PASSWORD_${agent.id.toUpperCase().replace('-', '_')}`] || (agent.id === 'agent-1' ? process.env.OBS_PASSWORD || '' : ''),
   obsInfo: { connected: false, replayBufferActive: false, error: '', host: agent.obsHost, port: agent.obsPort },
-  events: [], isSaving: false, twitchStatus: 'not_configured', youtubeStatus: 'not_configured', hype: new HypeMeter(agent), youtubeTimer: null, youtubePageToken: '',
-  twitchSocket: null, shouldReconnect: false, reconnecting: false
+  events: [], isSaving: false, twitchStatus: 'not_configured', youtubeStatus: 'not_configured', hype: new HypeMeter(agent), moments: new MomentScorer(), audio: new AudioPeakDetector({ thresholdDb: agent.audioPeakDb }), youtubeTimer: null, youtubePageToken: '',
+  twitchSocket: null, shouldReconnect: false, reconnecting: false, pendingMoment: null, pendingMomentTimer: null, lastSavedAt: 0
 });
 
 function log(agentId, type, message, detail = '') {
@@ -45,12 +54,49 @@ function log(agentId, type, message, detail = '') {
 }
 async function persist() { await fs.writeFile(CONFIG_PATH, JSON.stringify(agents, null, 2)); }
 async function persistClips() { await fs.writeFile(CLIPS_PATH, JSON.stringify(clips, null, 2)); }
-function ingestChat(agent, { id, user, text, at = Date.now() }) {
+function recordSignal(agent, { type, source, reason }, at = Date.now()) {
   const rt = runtime.get(agent.id);
-  const signal = rt.hype.add({ id, user, text, at });
+  const score = rt.moments.add({ type, source, reason, at });
+  if (!score.qualifies) return score;
+  log(agent.id, 'moment', `${score.score}/100 moment score`, score.reason);
+  if (agent.enabled && agent.autoSaveHype) {
+    if (!rt.pendingMomentTimer && rt.lastSavedAt && at - rt.lastSavedAt < Number(agent.clipDurationSeconds) * 1000) {
+      log(agent.id, 'system', 'Moment merged into the recent clip window', 'Skipped a second clip to reduce overlapping footage.');
+      return score;
+    }
+    rt.pendingMoment = score;
+    if (!rt.pendingMomentTimer) {
+      log(agent.id, 'system', `Saving in ${agent.postRollSeconds}s for reaction context`, 'Later signals during this delay are combined into the same clip.');
+      rt.pendingMomentTimer = setTimeout(async () => {
+        const pending = rt.pendingMoment;
+        rt.pendingMoment = null;
+        rt.pendingMomentTimer = null;
+        try { await saveReplay(agent.id, `Automatic moment · ${pending.score}/100 · ${pending.reason}`); }
+        catch (error) { log(agent.id, 'error', 'Automatic clip save failed', error.message); }
+      }, Number(agent.postRollSeconds) * 1000);
+    }
+  }
+  return score;
+}
+function ingestChat(agent, { id, user, text, at = Date.now() }) {
+  const signal = runtime.get(agent.id).hype.add({ id, user, text, at });
   if (!signal) return;
   log(agent.id, 'signal', 'Chat activity spike detected', signal.reason);
-  if (agent.autoSaveHype) void saveReplay(agent.id, `Chat activity spike: ${signal.reason}`).catch((error) => log(agent.id, 'error', 'Automatic clip save failed', error.message));
+  for (const type of signal.triggerTypes) recordSignal(agent, { type, source: 'chat', reason: signal.reason }, at);
+}
+function handleObsEvent(agent, type, data) {
+  if (type !== 'InputVolumeMeters') return;
+  const inputName = agent.audioInputName.trim();
+  if (!inputName) return;
+  const input = (data.inputs || []).find((item) => item.inputName === inputName);
+  if (!input) return;
+  const levels = (input.inputLevelsMul || []).flat().filter((value) => Number.isFinite(value));
+  if (!levels.length) return;
+  const signal = runtime.get(agent.id).audio.add({ inputName, multiplier: Math.max(...levels) });
+  if (signal) {
+    log(agent.id, 'signal', 'Loud audio burst detected', signal.reason);
+    recordSignal(agent, signal);
+  }
 }
 
 async function saveReplay(agentId, reason = 'Manual save') {
@@ -80,6 +126,7 @@ async function saveReplay(agentId, reason = 'Manual save') {
     const stat = await fs.stat(path.join(folder, filename));
     const clip = { id, agentId, filename, reason, bytes: stat.size, createdAt: new Date().toISOString(), source: agent.sourceName || agent.name };
     clips.unshift(clip); await persistClips();
+    rt.lastSavedAt = Date.now();
     log(agentId, 'clip', 'Replay saved', reason);
     return clip;
   } finally { rt.isSaving = false; }
@@ -150,6 +197,10 @@ async function youtubePoll(agent) {
     for (const item of body.items || []) {
       const snippet = item.snippet || {};
       const text = snippet.textMessageDetails?.messageText || snippet.superChatDetails?.userComment || snippet.memberMilestoneChatDetails?.userComment || snippet.messageType || '';
+      if (String(snippet.messageType || '').toLowerCase().includes('poll')) {
+        const question = snippet.pollDetails?.metadata?.questionText || 'A live poll was created or updated.';
+        recordSignal(agent, { type: 'poll_interaction', source: 'youtube_live_chat', reason: `YouTube poll interaction: ${question}` });
+      }
       ingestChat(agent, { id: `yt:${item.id}`, user: item.authorDetails?.channelId, text });
     }
     rt.youtubeTimer = setTimeout(() => youtubePoll(agent), Math.max(1000, Math.min(Number(body.pollingIntervalMillis || 5000), 30000)));
@@ -169,6 +220,7 @@ async function connectAgent(agent, body = {}) {
   rt.password = body.password ?? rt.password;
   rt.obsInfo = { connected: false, replayBufferActive: false, error: '', host, port };
   rt.obs = new ObsClient({ host, port, password: rt.password });
+  rt.obs.onEvent((type, data) => handleObsEvent(agent, type, data));
   try {
     const status = await rt.obs.connect();
     rt.obsInfo = { ...rt.obsInfo, connected: true, replayBufferActive: Boolean(status.outputActive), error: '' };
@@ -189,7 +241,7 @@ function getState() {
       const rt = runtime.get(agent.id);
       const items = clips.filter((clip) => clip.agentId === agent.id);
       return { ...agent, obs: rt.obsInfo, isSaving: rt.isSaving, clips: items, events: rt.events, chat: { twitch: rt.twitchStatus, youtube: rt.youtubeStatus },
-        capabilities: { capture: 'OBS Replay Buffer captures the scene configured for this OBS instance.', criteria: agent.criteria ? 'Saved, ready to refine into event rules.' : 'Add event-specific instructions when ready.', visualDetection: 'Not enabled in this build.' } };
+        capabilities: { capture: 'OBS Replay Buffer captures the scene configured for this OBS instance.', criteria: 'Chat spikes and configured OBS audio peaks are detected. Spoken clip requests, poll detection, and emotional speech classification need live transcription.', visualDetection: 'Not enabled in this build.' } };
     }), maxAgents: 5, publishing: { status: 'not_configured', note: 'Official upload integrations are not implemented yet. No publishing is simulated.' }
   };
 }
@@ -219,16 +271,23 @@ const server = http.createServer(async (req, res) => {
         name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), criteria: String(body.criteria || '').slice(0, 1000), sourceName: String(body.sourceName || '').slice(0, 100),
         twitchChannel: String(body.twitchChannel || '').replace(/^#/, '').slice(0, 60), youtubeLiveChatId: String(body.youtubeLiveChatId || '').slice(0, 200),
         autoSaveHype: Boolean(body.autoSaveHype), minMessages: Math.max(3, Math.min(100, Number(body.minMessages || 8))), windowSeconds: Math.max(5, Math.min(120, Number(body.windowSeconds || 20))),
-        multiplier: Math.max(1.2, Math.min(10, Number(body.multiplier || 2.5))), cooldownSeconds: Math.max(20, Math.min(3600, Number(body.cooldownSeconds || 90))), preRollSeconds: Math.max(5, Math.min(300, Number(body.preRollSeconds || 30)))
+        multiplier: Math.max(1.2, Math.min(10, Number(body.multiplier || 2.5))), cooldownSeconds: Math.max(20, Math.min(3600, Number(body.cooldownSeconds || 90))),
+        clipDurationSeconds: Math.max(150, Math.min(210, Number(body.clipDurationSeconds || 180))), postRollSeconds: Math.max(5, Math.min(60, Number(body.postRollSeconds || 20))),
+        audioInputName: String(body.audioInputName || '').slice(0, 100), audioPeakDb: Math.max(-30, Math.min(0, Number(body.audioPeakDb ?? -8)))
       });
       refreshHype(agent); await persist(); restartTwitch();
+      runtime.get(agent.id).audio = new AudioPeakDetector({ thresholdDb: agent.audioPeakDb });
+      if (!agent.autoSaveHype) { clearTimeout(runtime.get(agent.id).pendingMomentTimer); runtime.get(agent.id).pendingMomentTimer = null; runtime.get(agent.id).pendingMoment = null; }
       clearTimeout(runtime.get(agent.id).youtubeTimer); void youtubePoll(agent);
       return send(res, 200, getState());
     }
     if (req.method === 'POST' && url.pathname === '/api/stop-auto') {
       agents = agents.map((agent) => ({ ...agent, autoSaveHype: false }));
       await persist();
-      for (const agent of agents) log(agent.id, 'system', 'Global stop used', 'Automatic chat-triggered saves paused for every agent.');
+      for (const agent of agents) {
+        const rt = runtime.get(agent.id); clearTimeout(rt.pendingMomentTimer); rt.pendingMomentTimer = null; rt.pendingMoment = null;
+        log(agent.id, 'system', 'Global stop used', 'Automatic moment saves paused for every agent.');
+      }
       return send(res, 200, getState());
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/clips/')) {

@@ -45,16 +45,20 @@ function render() {
         <div class="field"><label>OBS HOST</label><input name="host" value="${escapeHtml(agent.obsHost)}" placeholder="127.0.0.1"></div>
         <div class="field"><label>OBS WEBSOCKET PORT</label><input name="port" type="number" value="${agent.obsPort}" min="1" max="65535"></div>
         <div class="field full"><label>OBS PASSWORD <span style="color:#5d6877">(session only)</span></label><input name="password" type="password" placeholder="Leave blank if no password" autocomplete="new-password"></div>
-        <div class="field full"><label>CLIP CRITERIA · PER AGENT</label><textarea name="criteria" placeholder="Tell this agent what moments to clip. Example: clutch saves, funny reactions, boss fights…">${escapeHtml(agent.criteria)}</textarea></div>
+        <div class="field full"><label>CLIP CRITERIA · PER AGENT</label><textarea name="criteria" placeholder="Describe the moments for this streamer…">${escapeHtml(agent.criteria)}</textarea></div>
+        <div class="field"><label>CLIP LENGTH · SECONDS</label><input name="clipDurationSeconds" type="number" min="150" max="210" value="${agent.clipDurationSeconds}"></div>
+        <div class="field"><label>REACTION TAIL · SECONDS</label><input name="postRollSeconds" type="number" min="5" max="60" value="${agent.postRollSeconds}"></div>
         <div class="field"><label>TWITCH CHAT CHANNEL</label><input name="twitchChannel" value="${escapeHtml(agent.twitchChannel)}" placeholder="channelname"></div>
         <div class="field"><label>YOUTUBE LIVE CHAT ID</label><input name="youtubeLiveChatId" value="${escapeHtml(agent.youtubeLiveChatId)}" placeholder="Requires Google OAuth token"></div>
+        <div class="field"><label>OBS STREAM AUDIO SOURCE</label><input name="audioInputName" value="${escapeHtml(agent.audioInputName)}" placeholder="e.g. Desktop Audio"></div>
+        <div class="field"><label>LOUD AUDIO THRESHOLD · dBFS</label><input name="audioPeakDb" type="number" min="-30" max="0" value="${agent.audioPeakDb}"></div>
         <div class="field"><label>SPIKE WINDOW · SECONDS</label><input name="windowSeconds" type="number" min="5" max="120" value="${agent.windowSeconds}"></div>
         <div class="field"><label>MESSAGES TO TRIGGER</label><input name="minMessages" type="number" min="3" max="100" value="${agent.minMessages}"></div>
-        <div class="field full"><label>CHAT SPIKE AUTOMATION</label><label class="auto-check"><input name="autoSaveHype" type="checkbox" ${agent.autoSaveHype ? 'checked' : ''}> Save replay on a chat activity spike <span style="color:#697587">· Twitch ${escapeHtml(agent.chat.twitch)} / YouTube ${escapeHtml(agent.chat.youtube)}</span></label></div>
+        <div class="field full"><label>AUTOMATIC MOMENT SAVES</label><label class="auto-check"><input name="autoSaveHype" type="checkbox" ${agent.autoSaveHype ? 'checked' : ''}> Save when chat activity or streamer audio peaks <span style="color:#697587">· Twitch ${escapeHtml(agent.chat.twitch)} / YouTube ${escapeHtml(agent.chat.youtube)}</span></label></div>
       </div>
       <div class="agent-actions"><button class="button primary mini" data-action="save-settings">Save settings</button><button class="button secondary mini" data-action="connect">${connected ? 'Reconnect OBS' : 'Connect OBS'}</button><button class="button secondary mini" data-action="save-clip" ${connected && agent.obs.replayBufferActive ? '' : 'disabled'}>● Save replay</button><label class="auto-check"><input name="enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Agent enabled</label><span class="replay-indicator">${agent.clips.length} saved</span></div>
       ${agent.obs.error ? `<p class="microcopy" style="color:#f2a5a0">${escapeHtml(agent.obs.error)}</p>` : ''}
-      <p class="microcopy">Criteria are stored per agent; current automation detects chat spikes. Event specific visual/audio matching is not active yet. Set OBS replay duration to your desired clip length / pre-roll.</p>
+      <p class="microcopy">Uses chat spikes, polls, and peaks from the named OBS audio source (often Desktop Audio or Browser Source audio). Set OBS Replay Buffer to ${agent.clipDurationSeconds}s; saves wait ${agent.postRollSeconds}s after a trigger. It suppresses overlapping auto-clips for one clip window. Spoken requests, streamer questions, and emotion labels need live transcription.</p>
       ${events ? `<div class="agent-events">${events}</div>` : ''}
     </article>`;
   }).join('');
@@ -79,7 +83,9 @@ function values(card) {
     name: get('name').value, sourceName: get('sourceName').value, host: get('host').value, port: get('port').value,
     password: get('password').value, criteria: get('criteria').value, twitchChannel: get('twitchChannel').value,
     youtubeLiveChatId: get('youtubeLiveChatId').value, windowSeconds: get('windowSeconds').value,
-    minMessages: get('minMessages').value, autoSaveHype: get('autoSaveHype').checked, enabled: get('enabled').checked,
+    minMessages: get('minMessages').value, clipDurationSeconds: get('clipDurationSeconds').value, postRollSeconds: get('postRollSeconds').value,
+    audioInputName: get('audioInputName').value, audioPeakDb: get('audioPeakDb').value,
+    autoSaveHype: get('autoSaveHype').checked, enabled: get('enabled').checked,
     multiplier: appState.agents.find((agent) => agent.id === card.dataset.agent).multiplier,
     cooldownSeconds: appState.agents.find((agent) => agent.id === card.dataset.agent).cooldownSeconds,
     preRollSeconds: appState.agents.find((agent) => agent.id === card.dataset.agent).preRollSeconds
