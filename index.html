@@ -1,1 +1,35 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#0c0d11"/><title>Splice Studio — Video to standout clips</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0e13" />
+    <title>Stream Clipper Agent</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark">SC</div><div><b>Stream Clipper</b><span>LOCAL AGENT</span></div></div>
+        <div class="side-label">WORKSPACE</div>
+        <a class="nav active" href="#agents"><span>◫</span> Stream agents <small>5</small></a>
+        <a class="nav" href="#library"><span>▧</span> Clip library</a>
+        <a class="nav" href="#publishing"><span>↗</span> Publishing</a>
+        <div class="side-bottom"><div class="local-badge"><i></i><div><b>Running on this PC</b><span>Browser may close</span></div></div><p>Local capture through OBS Replay Buffer. Your stream is not fetched from its platform.</p></div>
+      </aside>
+      <main>
+        <header class="topbar"><div class="crumb">Workspace <span>/</span> Stream agents</div><button id="stop-all" class="button danger ghost">■ <span>Stop automation</span></button></header>
+        <section class="page-head" id="agents"><div><div class="eyebrow">MULTI-STREAM WORKSPACE</div><h1>Your stream agents</h1><p>Run up to five independent OBS captures with one shared clipping profile and a review-first workflow.</p></div><div class="head-pill"><i></i><span id="agents-running">0 active agents</span></div></section>
+        <div class="notice"><span class="notice-icon">ⓘ</span><div><b>Each agent needs its own OBS WebSocket endpoint and Replay Buffer.</b><span>Run multiple OBS instances for separate streams. Five simultaneous captures can use substantial CPU, GPU, and disk space.</span></div><a href="#setup">Setup guide ↗</a></div>
+        <section class="criteria-card"><div><div class="eyebrow">SHARED CLIP PROFILE</div><h2>What should all agents clip?</h2><p>One set of criteria applies to every agent. Edit it here once.</p></div><textarea id="shared-criteria" rows="5" aria-label="Shared clip criteria"></textarea><button id="save-criteria" class="button primary">Apply to all agents</button></section>
+        <section id="agent-grid" class="agent-grid" aria-live="polite"></section>
+        <section class="publish-card" id="publishing"><div class="publish-icon">✓</div><div class="publish-copy"><div class="eyebrow">REVIEW MODE</div><h2>Review clips before publishing</h2><p>Captured moments stay in your local clip library for review and download. Social account connections and publishing are the next phase; this app does not post automatically.</p></div><div class="publish-status"><span class="status-chip muted">REVIEW FIRST</span><small>Nothing is posted automatically.</small></div></section>
+        <section id="library" class="library"><div class="section-title"><div><div class="eyebrow">RECENT CAPTURES</div><h2>Clip library</h2></div><span id="clip-count" class="count">0 clips</span></div><div id="clip-grid" class="clip-grid"></div></section>
+        <section id="setup" class="setup"><div class="eyebrow">CAPTURE WORKFLOW</div><h2>How to connect a stream</h2><div class="steps"><div><b>01</b><span>Add a browser or display capture of the Twitch / YouTube player inside OBS.</span></div><div><b>02</b><span>Enable OBS WebSocket and Replay Buffer. Set each agent to a distinct OBS port.</span></div><div><b>03</b><span>Connect the agent, then save a replay manually or enable chat-spike saves.</span></div></div><p>Stream Clipper captures the OBS scene you control. It does not download or extract protected video from a platform URL.</p></section>
+        <footer>Stream Clipper Agent <span>·</span> Local-first capture <span>·</span> v0.1</footer>
+      </main>
+    </div>
+    <div id="toast" role="status" class="toast"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

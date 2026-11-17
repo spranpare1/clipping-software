@@ -1,5 +1,6 @@
 node_modules/
 dist/
 data/
+clips/
 .env
 .DS_Store

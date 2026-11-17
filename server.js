@@ -35,6 +35,8 @@ try {
     const saved = savedAgents.find((item) => item.id === defaults.id) || {};
     return { ...defaults, ...saved, criteria: saved.criteria?.trim() ? saved.criteria : defaults.criteria };
   });
+  const sharedCriteria = agents[0]?.criteria || DEFAULT_CRITERIA;
+  agents = agents.map((agent) => ({ ...agent, criteria: sharedCriteria }));
 } catch {}
 try { clips = JSON.parse(await fs.readFile(CLIPS_PATH, 'utf8')); } catch {}
 const runtime = new Map();
@@ -254,6 +256,14 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   try {
     if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, getState());
+    if (req.method === 'PUT' && url.pathname === '/api/criteria') {
+      const body = await bodyJson(req);
+      const criteria = String(body.criteria ?? '').slice(0, 2000);
+      agents = agents.map((agent) => ({ ...agent, criteria }));
+      await persist();
+      for (const agent of agents) log(agent.id, 'system', 'Shared clip criteria updated', 'This profile applies to every agent.');
+      return send(res, 200, getState());
+    }
     const match = url.pathname.match(/^\/api\/agents\/(agent-[1-5])(?:\/(connect|disconnect|save))?$/);
     if (match) {
       const [, id, action] = match; const agent = agents.find((item) => item.id === id); const rt = runtime.get(id);
@@ -268,7 +278,7 @@ const server = http.createServer(async (req, res) => {
       const agent = agents.find((item) => item.id === settingsMatch[1]); if (!agent) return send(res, 404, { error: 'Agent slot not found.' });
       const body = await bodyJson(req);
       Object.assign(agent, {
-        name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), criteria: String(body.criteria || '').slice(0, 1000), sourceName: String(body.sourceName || '').slice(0, 100),
+        name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), sourceName: String(body.sourceName || '').slice(0, 100),
         twitchChannel: String(body.twitchChannel || '').replace(/^#/, '').slice(0, 60), youtubeLiveChatId: String(body.youtubeLiveChatId || '').slice(0, 200),
         autoSaveHype: Boolean(body.autoSaveHype), minMessages: Math.max(3, Math.min(100, Number(body.minMessages || 8))), windowSeconds: Math.max(5, Math.min(120, Number(body.windowSeconds || 20))),
         multiplier: Math.max(1.2, Math.min(10, Number(body.multiplier || 2.5))), cooldownSeconds: Math.max(20, Math.min(3600, Number(body.cooldownSeconds || 90))),

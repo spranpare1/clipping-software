@@ -4,6 +4,7 @@ const toast = document.querySelector('#toast');
 let appState = null;
 let toastTimer;
 const dirtyForms = new Map();
+let sharedCriteriaDirty = false;
 const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const timeAgo = (iso) => {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -32,6 +33,7 @@ function render() {
   document.querySelector('#agents-running').textContent = `${active} of 5 agents enabled`;
   const allClips = appState.agents.flatMap((agent) => agent.clips.map((clip) => ({ ...clip, agentName: agent.name }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   document.querySelector('#clip-count').textContent = `${allClips.length} clip${allClips.length === 1 ? '' : 's'}`;
+  if (!sharedCriteriaDirty) document.querySelector('#shared-criteria').value = appState.agents[0]?.criteria || '';
   grid.innerHTML = appState.agents.map((agent, index) => {
     const connected = agent.obs.connected;
     const status = connected ? (agent.obs.replayBufferActive ? 'BUFFER READY' : 'BUFFER OFF') : (agent.obs.error ? 'NEEDS ATTENTION' : (agent.enabled ? 'NOT CONNECTED' : 'PAUSED'));
@@ -45,7 +47,6 @@ function render() {
         <div class="field"><label>OBS HOST</label><input name="host" value="${escapeHtml(agent.obsHost)}" placeholder="127.0.0.1"></div>
         <div class="field"><label>OBS WEBSOCKET PORT</label><input name="port" type="number" value="${agent.obsPort}" min="1" max="65535"></div>
         <div class="field full"><label>OBS PASSWORD <span style="color:#5d6877">(session only)</span></label><input name="password" type="password" placeholder="Leave blank if no password" autocomplete="new-password"></div>
-        <div class="field full"><label>CLIP CRITERIA · PER AGENT</label><textarea name="criteria" placeholder="Describe the moments for this streamer…">${escapeHtml(agent.criteria)}</textarea></div>
         <div class="field"><label>CLIP LENGTH · SECONDS</label><input name="clipDurationSeconds" type="number" min="150" max="210" value="${agent.clipDurationSeconds}"></div>
         <div class="field"><label>REACTION TAIL · SECONDS</label><input name="postRollSeconds" type="number" min="5" max="60" value="${agent.postRollSeconds}"></div>
         <div class="field"><label>TWITCH CHAT CHANNEL</label><input name="twitchChannel" value="${escapeHtml(agent.twitchChannel)}" placeholder="channelname"></div>
@@ -81,7 +82,7 @@ function values(card) {
   const get = (name) => card.querySelector(`[name="${name}"]`);
   return {
     name: get('name').value, sourceName: get('sourceName').value, host: get('host').value, port: get('port').value,
-    password: get('password').value, criteria: get('criteria').value, twitchChannel: get('twitchChannel').value,
+    password: get('password').value, twitchChannel: get('twitchChannel').value,
     youtubeLiveChatId: get('youtubeLiveChatId').value, windowSeconds: get('windowSeconds').value,
     minMessages: get('minMessages').value, clipDurationSeconds: get('clipDurationSeconds').value, postRollSeconds: get('postRollSeconds').value,
     audioInputName: get('audioInputName').value, audioPeakDb: get('audioPeakDb').value,
@@ -108,6 +109,18 @@ function rememberForm(event) {
 }
 grid.addEventListener('input', rememberForm);
 grid.addEventListener('change', rememberForm);
+document.querySelector('#shared-criteria').addEventListener('input', () => { sharedCriteriaDirty = true; });
+document.querySelector('#save-criteria').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await request('/api/criteria', { method: 'PUT', body: JSON.stringify({ criteria: document.querySelector('#shared-criteria').value }) });
+    sharedCriteriaDirty = false;
+    await refresh();
+    notify('Shared criteria applied to all five agents.');
+  } catch (error) { notify(error.message, true); }
+  finally { button.disabled = false; }
+});
 grid.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]'); if (!button) return;
   const card = button.closest('.agent-card'); const action = button.dataset.action; const id = card.dataset.agent;
