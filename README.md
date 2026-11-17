@@ -74,7 +74,7 @@ Running five agents means running five OBS instances (or otherwise providing fiv
 
 Live speech currently supports Windows DirectShow capture with hosted OpenAI transcription or local Whisper.cpp. Each enabled agent needs an audio device that carries its own OBS monitor mix. Hosted mode sends audio to the provider; local mode keeps it on the PC. Transcript text is not persisted; short WAV chunks are deleted after each attempt. Vocal emotion is not reliably classified. If you monitor five agents, each needs a distinct audio capture device and the PC must keep up with transcription in real time.
 
-To reach the dashboard from your other devices privately, connect those devices to your Tailscale network and run `tailscale serve --bg 4179` on the capture PC. Open the HTTPS address it prints. Do not expose this app with Tailscale Funnel or router port forwarding; it does not have its own login system yet.
+To reach the dashboard from your other devices privately, connect those devices to your Tailscale network and run `tailscale serve --bg 4179` on the capture PC. Open the HTTPS address it prints. The [Windows quick-start guide](QUICK_START_WINDOWS.md#6-open-the-dashboard-from-your-other-devices-with-tailscale) has the full setup steps. Do not expose this app with Tailscale Funnel or router port forwarding; it does not have its own login system yet.
 
 ## Chat credentials
 

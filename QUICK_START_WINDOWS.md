@@ -122,8 +122,34 @@ Chat monitoring is separate from speech monitoring. Twitch needs a user token wi
 - **Speech status says unsupported:** Live audio capture currently supports Windows DirectShow only.
 - **No clip after a spoken cue:** Enable **Automatic moment saves** as well as **Live speech**, and make sure OBS’s Replay Buffer is connected and has had time to fill.
 
-## Keep the dashboard private
+## 6. Open the dashboard from your other devices with Tailscale
 
-The app has no sign-in screen and listens only on the local computer. Do not expose it to the public internet or use Tailscale Funnel. If you want to open it from your own devices, use your private Tailscale network and the Tailscale Serve setup in the full README.
+Tailscale connects your devices through a private network. Its Personal plan is free for personal use and currently includes up to six users and unlimited devices ([plan details](https://tailscale.com/pricing)).
+
+1. Install Tailscale on the capture PC and on each phone or computer you want to use to open the dashboard. Sign in to the same Tailscale account on all of them.
+2. Start Stream Clipper on the capture PC and leave it running:
+
+   ```powershell
+   npm start
+   ```
+
+3. Open a second PowerShell window and run:
+
+   ```powershell
+   tailscale serve --bg 4179
+   ```
+
+4. If Tailscale asks you to enable Serve or HTTPS, follow the link or instructions it prints. It will then show a private HTTPS address for the dashboard.
+5. On your other device, make sure Tailscale is connected and open the address that Tailscale printed. Check the service with `tailscale serve status`.
+
+Tailscale Serve keeps this dashboard reachable only to devices on your private Tailscale network. The app has no separate sign-in, so only add devices you trust. **Do not use Tailscale Funnel or router port forwarding.** Keep the capture PC awake and Stream Clipper running.
+
+To turn off Serve, run:
+
+```powershell
+tailscale serve --https=443 off
+```
+
+See [Tailscale's Serve setup guide](https://tailscale.com/docs/solutions/host-private-server-docker) for more information.
 
 To stop the app, return to its PowerShell window and press **Ctrl+C**. To stop speech transcription but keep clipping, uncheck **Live speech** and save settings.
