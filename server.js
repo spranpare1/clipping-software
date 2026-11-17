@@ -8,6 +8,7 @@ import { ObsClient } from './lib/obs-client.js';
 import { HypeMeter } from './lib/hype.js';
 import { AudioPeakDetector, MomentScorer } from './lib/moments.js';
 import { formattingPlan, probeMedia, renderFormattedClip } from './lib/clip-formatter.js';
+import { detectSpeechCues, LiveSpeechCapture } from './lib/live-speech.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(ROOT, 'data');
@@ -26,7 +27,7 @@ const DEFAULT_CRITERIA = 'Target about 3 minutes. Include buildup, the main even
 const defaultAgents = Array.from({ length: 5 }, (_, i) => ({
   id: `agent-${i + 1}`, name: `Clipper ${i + 1}`, enabled: i === 0, criteria: DEFAULT_CRITERIA, sourceName: '', obsHost: i === 0 ? (process.env.OBS_HOST || '127.0.0.1') : '127.0.0.1', obsPort: i === 0 ? Number(process.env.OBS_PORT || 4455) : 4455 + i,
   twitchChannel: '', youtubeLiveChatId: '', autoSaveHype: false, minMessages: 8, windowSeconds: 20, multiplier: 2.5, cooldownSeconds: 90,
-  clipDurationSeconds: 180, postRollSeconds: 20, audioInputName: '', audioPeakDb: -8, outputAspectRatio: '9:16'
+  clipDurationSeconds: 180, postRollSeconds: 20, audioInputName: '', audioPeakDb: -8, outputAspectRatio: '9:16', speechMonitoringEnabled: false, speechAudioDevice: ''
 }));
 let agents = defaultAgents;
 let clips = [];
@@ -46,7 +47,7 @@ for (const agent of agents) runtime.set(agent.id, {
   obs: null, password: process.env[`OBS_PASSWORD_${agent.id.toUpperCase().replace('-', '_')}`] || (agent.id === 'agent-1' ? process.env.OBS_PASSWORD || '' : ''),
   obsInfo: { connected: false, replayBufferActive: false, error: '', host: agent.obsHost, port: agent.obsPort },
   events: [], isSaving: false, twitchStatus: 'not_configured', youtubeStatus: 'not_configured', hype: new HypeMeter(agent), moments: new MomentScorer(), audio: new AudioPeakDetector({ thresholdDb: agent.audioPeakDb }), youtubeTimer: null, youtubePageToken: '',
-  twitchSocket: null, shouldReconnect: false, reconnecting: false, pendingMoment: null, pendingMomentTimer: null, lastSavedAt: 0
+  twitchSocket: null, speech: null, speechStatus: { state: 'stopped', message: 'Speech monitoring is off.' }, shouldReconnect: false, reconnecting: false, pendingMoment: null, pendingMomentTimer: null, lastSavedAt: 0
 });
 
 function log(agentId, type, message, detail = '') {
@@ -95,6 +96,46 @@ function ingestChat(agent, { id, user, text, at = Date.now() }) {
   if (!signal) return;
   log(agent.id, 'signal', 'Chat activity spike detected', signal.reason);
   for (const type of signal.triggerTypes) recordSignal(agent, { type, source: 'chat', reason: signal.reason }, at);
+}
+function handleSpeechTranscript(agent, { text, at }) {
+  const cues = detectSpeechCues(text);
+  for (const cue of cues) {
+    log(agent.id, 'signal', cue.reason, 'Detected in the live audio transcript.');
+    recordSignal(agent, { type: cue.type, source: 'speech', reason: cue.reason }, at);
+  }
+}
+async function configureSpeech(agent) {
+  const rt = runtime.get(agent.id);
+  if (rt.speech) { await rt.speech.stop(); rt.speech = null; }
+  if (!agent.enabled || !agent.speechMonitoringEnabled) {
+    rt.speechStatus = { state: 'stopped', message: 'Speech monitoring is off.' };
+    return;
+  }
+  if (process.platform !== 'win32') {
+    rt.speechStatus = { state: 'unsupported', message: 'Live audio capture is currently configured for Windows DirectShow.' };
+    return;
+  }
+  if (!agent.speechAudioDevice.trim()) {
+    rt.speechStatus = { state: 'needs_device', message: 'Choose the DirectShow device receiving OBS audio.' };
+    return;
+  }
+  const provider = process.env.SPEECH_TRANSCRIPTION_PROVIDER || 'openai';
+  const speech = new LiveSpeechCapture({
+    agentId: agent.id, device: agent.speechAudioDevice, folder: path.join(DATA, 'speech-temp', agent.id),
+    provider, apiKey: process.env.OPENAI_API_KEY, model: process.env.SPEECH_TRANSCRIPTION_MODEL || 'gpt-transcribe',
+    whisperModel: process.env.WHISPER_MODEL_PATH || '', whisperPath: process.env.WHISPER_CPP_PATH || 'whisper-cli',
+    ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
+    onTranscript: (event) => handleSpeechTranscript(agent, event),
+    onStatus: (status) => { rt.speechStatus = status; },
+    onError: (error) => log(agent.id, 'error', 'Live speech monitor issue', error.message)
+  });
+  rt.speech = speech;
+  try { await speech.start(); }
+  catch (error) {
+    rt.speech = null;
+    rt.speechStatus = { state: 'error', message: error.message };
+    log(agent.id, 'error', 'Live speech monitor could not start', error.message);
+  }
 }
 function handleObsEvent(agent, type, data) {
   if (type !== 'InputVolumeMeters') return;
@@ -357,8 +398,8 @@ function getState() {
     agents: agents.map((agent) => {
       const rt = runtime.get(agent.id);
       const items = clips.filter((clip) => clip.agentId === agent.id);
-      return { ...agent, obs: rt.obsInfo, isSaving: rt.isSaving, clips: items, events: rt.events, chat: { twitch: rt.twitchStatus, youtube: rt.youtubeStatus },
-        capabilities: { capture: 'OBS Replay Buffer captures the scene configured for this OBS instance.', criteria: 'Chat spikes and configured OBS audio peaks are detected. Spoken clip requests, poll detection, and emotional speech classification need live transcription.', visualDetection: 'Not enabled in this build.' } };
+      return { ...agent, obs: rt.obsInfo, speech: rt.speechStatus, isSaving: rt.isSaving, clips: items, events: rt.events, chat: { twitch: rt.twitchStatus, youtube: rt.youtubeStatus },
+        capabilities: { capture: 'OBS Replay Buffer captures the scene configured for this OBS instance.', criteria: 'Chat spikes, configured OBS loudness peaks, and optional speech phrase cues are detected. Speech reaction phrases are heuristic, not vocal emotion recognition.', visualDetection: 'Not enabled in this build.' } };
     }), maxAgents: 5, publishing: { status: 'not_configured', note: 'Official upload integrations are not implemented yet. No publishing is simulated.' }
   };
 }
@@ -395,6 +436,7 @@ const server = http.createServer(async (req, res) => {
       Object.assign(agent, {
         name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), sourceName: String(body.sourceName || '').slice(0, 100),
         outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(body.outputAspectRatio) ? body.outputAspectRatio : agent.outputAspectRatio,
+        speechMonitoringEnabled: Boolean(body.speechMonitoringEnabled), speechAudioDevice: String(body.speechAudioDevice || '').slice(0, 200),
         twitchChannel: String(body.twitchChannel || '').replace(/^#/, '').slice(0, 60), youtubeLiveChatId: String(body.youtubeLiveChatId || '').slice(0, 200),
         autoSaveHype: Boolean(body.autoSaveHype), minMessages: Math.max(3, Math.min(100, Number(body.minMessages || 8))), windowSeconds: Math.max(5, Math.min(120, Number(body.windowSeconds || 20))),
         multiplier: Math.max(1.2, Math.min(10, Number(body.multiplier || 2.5))), cooldownSeconds: Math.max(20, Math.min(3600, Number(body.cooldownSeconds || 90))),
@@ -402,6 +444,7 @@ const server = http.createServer(async (req, res) => {
         audioInputName: String(body.audioInputName || '').slice(0, 100), audioPeakDb: Math.max(-30, Math.min(0, Number(body.audioPeakDb ?? -8)))
       });
       refreshHype(agent); await persist(); restartTwitch();
+      await configureSpeech(agent);
       runtime.get(agent.id).audio = new AudioPeakDetector({ thresholdDb: agent.audioPeakDb });
       if (!agent.autoSaveHype) { clearTimeout(runtime.get(agent.id).pendingMomentTimer); runtime.get(agent.id).pendingMomentTimer = null; runtime.get(agent.id).pendingMoment = null; }
       clearTimeout(runtime.get(agent.id).youtubeTimer); void youtubePoll(agent);
@@ -450,7 +493,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 restartTwitch();
-for (const agent of agents) if (agent.enabled) void youtubePoll(agent);
+for (const agent of agents) if (agent.enabled) {
+  void youtubePoll(agent);
+  void configureSpeech(agent);
+}
 for (const clip of clips) {
   if (['queued', 'processing'].includes(clip.formatting?.status)) enqueueFormatting(clip.id);
 }
@@ -472,4 +518,4 @@ setInterval(async () => {
 }, 5000);
 const port = Number(process.env.PORT || 4179);
 server.listen(port, '127.0.0.1', () => console.log(`Stream Clipper Agent running at http://127.0.0.1:${port}`));
-server.on('close', () => { clearTimeout(twitchReconnectTimer); for (const rt of runtime.values()) { rt.obs?.close(); rt.twitchSocket?.close(); clearTimeout(rt.youtubeTimer); } });
+server.on('close', () => { clearTimeout(twitchReconnectTimer); for (const rt of runtime.values()) { rt.obs?.close(); rt.twitchSocket?.close(); clearTimeout(rt.youtubeTimer); void rt.speech?.stop(); } });

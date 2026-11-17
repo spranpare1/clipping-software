@@ -9,6 +9,8 @@ The primary project in this repository is now **Stream Clipper**: a local-first 
 - Twitch chat reading over Twitch's secure IRC WebSocket using a user OAuth token with `chat:read`.
 - YouTube Live chat reading through the official Live Chat Messages API, honoring the API's returned polling interval.
 - Explainable moment score combines Twitch/YouTube chat bursts, repeated vote replies, emote/high-energy spam, YouTube poll events, and (when configured) sustained OBS audio peaks. Overlapping independent signals raise the score. Automatic saving is opt-in per agent; a global stop cancels pending saves for all agents.
+- Optional Windows live-speech monitoring captures short audio windows from an OBS monitor device and sends them to the configured transcription API. It can recognize explicit “clip that/this/it” requests and poll or chat-decision prompts. Matching text is combined with existing chat and audio signals; short audio files are deleted after transcription.
+- Phrase cues such as “let’s go,” “no way,” and laughter text can add a weak reaction signal. This is a text heuristic, not reliable vocal-emotion recognition. Yelling/laughter audio classification still needs a dedicated model.
 - Each agent targets roughly 180 seconds and delays saves by 20 seconds by default to include reaction context. Set that agent's OBS Replay Buffer to the configured duration; saves wait the post-trigger setting before asking OBS to write the rolling buffer.
 - Every saved replay enters a persistent, single-worker formatting queue. FFmpeg creates an MP4 in the selected output ratio; ffprobe checks the rendered dimensions, duration, and audio. The original is preserved, and formatted outputs appear under `clips/<agent-id>/formatted/`.
 - The automatic layout keeps the entire source visible over a blurred background fill, so it never guesses a face or cuts off gameplay. It does not yet detect speakers, track subjects, recognize content types, or add captions.
@@ -16,7 +18,7 @@ The primary project in this repository is now **Stream Clipper**: a local-first 
 - Clips and configuration are stored in this directory.
 - Browser shortcut `Ctrl+Shift+S` saves a replay for the first enabled, connected agent while the dashboard tab has focus.
 
-The shared criteria box stores the selection rules for all five agents. The implemented detector covers chat signals, YouTube poll events, and loud audio bursts from a named OBS input. Loudness is only an audio-intensity signal; it does not classify laughter, rage, exhaustion, or other emotions. Detecting streamer phrases such as “clip that,” spoken polls/questions, and emotional speech requires a live speech-to-text source, which is not connected yet. Visual event recognition, context-aware trimming, captions, editing, and social publishing are also not implemented. The first publishing workflow will be review-first; the publishing panel is intentionally marked unavailable until official account integrations are built.
+The shared criteria box stores the selection rules for all five agents. The implemented detector covers chat signals, YouTube poll events, loud audio bursts, and opt-in speech phrase cues. Loudness and text patterns do not reliably classify laughter, rage, exhaustion, or vocal emotion. Visual event recognition, speaker/face tracking, caption generation, editing, and social publishing are not implemented. The first publishing workflow will be review-first; the publishing panel is intentionally marked unavailable until official account integrations are built.
 
 ## Architecture
 
@@ -24,6 +26,7 @@ The shared criteria box stores the selection rules for all five agents. The impl
 - **Capture and rolling buffer:** OBS Studio 28+ with its official obs-websocket protocol and Replay Buffer. Configure an OBS Browser Source or Window/Display Capture to show the stream. This captures the OBS scene, not a downloaded platform video file.
 - **Chat events:** Twitch secure IRC WebSocket (`chat:read`) and YouTube Live Chat Messages API (authorized bearer token and a broadcast `liveChatId`).
 - **Audio event signal:** OBS high-volume `InputVolumeMeters` events, filtered to the exact source name entered on that agent. The threshold is configurable in dBFS and is intended to find sustained loud bursts, not understand their meaning.
+- **Speech cue signal (optional):** On Windows, FFmpeg's DirectShow input captures a configured audio device into eight-second mono WAV chunks. Use the hosted OpenAI API or a local `whisper.cpp` CLI. Audio chunks are deleted after processing; hosted transcription sends them to the provider, while local Whisper keeps them on the PC.
 - **Persistence:** Local JSON files in `data/` and media in `clips/`. Both are ignored by Git. Clip state updates use atomic file replacement.
 - **Background work:** The Node service stays running after the browser closes. OBS maintains the rolling buffer; a single FFmpeg worker formats clips sequentially to limit resource use. The process must remain running for chat monitoring and active rendering; interrupted formatting resumes when it is started again.
 
@@ -60,6 +63,15 @@ Running five agents means running five OBS instances (or otherwise providing fiv
 
 7. Open <http://127.0.0.1:4179>, set each agent's source and chat source, enter the shared clip criteria once, then connect the agents to OBS. The password entered in the page is kept only in the running process; environment variables are better for unattended use (`OBS_PASSWORD_AGENT_1`, etc.).
 
+### Optional live speech cues on Windows
+
+1. Choose a provider in `.env`. For hosted transcription, set `SPEECH_TRANSCRIPTION_PROVIDER=openai`, add `OPENAI_API_KEY`, and use the default `gpt-transcribe` model (or another model available to your API account). For local transcription, set `SPEECH_TRANSCRIPTION_PROVIDER=local-whisper`, install/build Whisper.cpp, and set `WHISPER_CPP_PATH` and `WHISPER_MODEL_PATH` to its CLI and model file.
+2. Route the OBS audio you want analyzed to a Windows audio loopback/virtual-cable device. In OBS, choose that device as the **Monitoring Device**, then set the relevant source to **Monitor and Output** so it remains in the stream recording too.
+3. Find the DirectShow capture-device name with `ffmpeg -list_devices true -f dshow -i dummy`. In the agent card, enable **Live speech** and enter that exact audio device name. Save settings. The status line reports missing credentials, missing device, or capture errors.
+4. Enable **Automatic moment saves** separately if you want speech cues to save replays. When off, cues are logged but do not save clips. Cue detection waits for each eight-second audio window plus transcription time; OBS's rolling buffer supplies the buildup and the configured reaction tail supplies extra context.
+
+Live speech currently supports Windows DirectShow capture with hosted OpenAI transcription or local Whisper.cpp. Each enabled agent needs an audio device that carries its own OBS monitor mix. Hosted mode sends audio to the provider; local mode keeps it on the PC. Transcript text is not persisted; short WAV chunks are deleted after each attempt. Vocal emotion is not reliably classified. If you monitor five agents, each needs a distinct audio capture device and the PC must keep up with transcription in real time.
+
 To reach the dashboard from your other devices privately, connect those devices to your Tailscale network and run `tailscale serve --bg 4179` on the capture PC. Open the HTTPS address it prints. Do not expose this app with Tailscale Funnel or router port forwarding; it does not have its own login system yet.
 
 ## Chat credentials
@@ -90,6 +102,8 @@ Missing or expired credentials leave the provider disconnected and create an err
 - [Twitch Chat and Chatbots](https://dev.twitch.tv/docs/chat/)
 - [YouTube Live Chat Messages: list](https://developers.google.com/youtube/data/live/reference/rest/v3/liveChatMessages/list)
 - [FFmpeg](https://ffmpeg.org/download.html)
+- [FFmpeg DirectShow input device](https://ffmpeg.org/ffmpeg-devices.html#dshow)
+- [OpenAI audio transcription API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)
 
 ## Publishing roadmap
 
