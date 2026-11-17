@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { ObsClient } from './lib/obs-client.js';
 import { HypeMeter } from './lib/hype.js';
 import { AudioPeakDetector, MomentScorer } from './lib/moments.js';
+import { formattingPlan, probeMedia, renderFormattedClip } from './lib/clip-formatter.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(ROOT, 'data');
@@ -25,7 +26,7 @@ const DEFAULT_CRITERIA = 'Target about 3 minutes. Include buildup, the main even
 const defaultAgents = Array.from({ length: 5 }, (_, i) => ({
   id: `agent-${i + 1}`, name: `Clipper ${i + 1}`, enabled: i === 0, criteria: DEFAULT_CRITERIA, sourceName: '', obsHost: i === 0 ? (process.env.OBS_HOST || '127.0.0.1') : '127.0.0.1', obsPort: i === 0 ? Number(process.env.OBS_PORT || 4455) : 4455 + i,
   twitchChannel: '', youtubeLiveChatId: '', autoSaveHype: false, minMessages: 8, windowSeconds: 20, multiplier: 2.5, cooldownSeconds: 90,
-  clipDurationSeconds: 180, postRollSeconds: 20, audioInputName: '', audioPeakDb: -8
+  clipDurationSeconds: 180, postRollSeconds: 20, audioInputName: '', audioPeakDb: -8, outputAspectRatio: '9:16'
 }));
 let agents = defaultAgents;
 let clips = [];
@@ -36,7 +37,7 @@ try {
     return { ...defaults, ...saved, criteria: saved.criteria?.trim() ? saved.criteria : defaults.criteria };
   });
   const sharedCriteria = agents[0]?.criteria || DEFAULT_CRITERIA;
-  agents = agents.map((agent) => ({ ...agent, criteria: sharedCriteria }));
+  agents = agents.map((agent) => ({ ...agent, criteria: sharedCriteria, outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(agent.outputAspectRatio) ? agent.outputAspectRatio : '9:16' }));
 } catch {}
 try { clips = JSON.parse(await fs.readFile(CLIPS_PATH, 'utf8')); } catch {}
 const runtime = new Map();
@@ -55,7 +56,16 @@ function log(agentId, type, message, detail = '') {
   rt.events = rt.events.slice(0, 30);
 }
 async function persist() { await fs.writeFile(CONFIG_PATH, JSON.stringify(agents, null, 2)); }
-async function persistClips() { await fs.writeFile(CLIPS_PATH, JSON.stringify(clips, null, 2)); }
+let clipsPersistChain = Promise.resolve();
+async function persistClips() {
+  const snapshot = JSON.stringify(clips, null, 2);
+  clipsPersistChain = clipsPersistChain.catch(() => {}).then(async () => {
+    const tempPath = `${CLIPS_PATH}.${randomUUID()}.tmp`;
+    await fs.writeFile(tempPath, snapshot);
+    await fs.rename(tempPath, CLIPS_PATH);
+  });
+  return clipsPersistChain;
+}
 function recordSignal(agent, { type, source, reason }, at = Date.now()) {
   const rt = runtime.get(agent.id);
   const score = rt.moments.add({ type, source, reason, at });
@@ -126,12 +136,117 @@ async function saveReplay(agentId, reason = 'Manual save') {
     const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${id.slice(0, 8)}${ext}`;
     await fs.copyFile(replayPath, path.join(folder, filename));
     const stat = await fs.stat(path.join(folder, filename));
-    const clip = { id, agentId, filename, reason, bytes: stat.size, createdAt: new Date().toISOString(), source: agent.sourceName || agent.name };
+    const clip = {
+      id, agentId, filename, reason, bytes: stat.size, createdAt: new Date().toISOString(), source: agent.sourceName || agent.name,
+      formatting: { status: 'queued', stage: 'Waiting for formatter', progress: 0, aspectRatio: agent.outputAspectRatio || '9:16', updatedAt: new Date().toISOString() }
+    };
     clips.unshift(clip); await persistClips();
     rt.lastSavedAt = Date.now();
-    log(agentId, 'clip', 'Replay saved', reason);
+    log(agentId, 'clip', 'Replay saved · formatting queued', reason);
+    enqueueFormatting(clip.id);
     return clip;
   } finally { rt.isSaving = false; }
+}
+
+const formattingQueue = [];
+const queuedFormatting = new Set();
+let formattingWorkerRunning = false;
+function enqueueFormatting(clipId) {
+  if (queuedFormatting.has(clipId)) return;
+  const clip = clips.find((item) => item.id === clipId);
+  if (!clip || clip.formatting?.status === 'ready' || clip.formatting?.status === 'failed') return;
+  queuedFormatting.add(clipId);
+  formattingQueue.push(clipId);
+  void drainFormattingQueue();
+}
+async function drainFormattingQueue() {
+  if (formattingWorkerRunning) return;
+  formattingWorkerRunning = true;
+  try {
+    while (formattingQueue.length) {
+      const clipId = formattingQueue.shift();
+      queuedFormatting.delete(clipId);
+      const clip = clips.find((item) => item.id === clipId);
+      const agent = agents.find((item) => item.id === clip?.agentId);
+      if (!clip || !agent) continue;
+      try { await formatClip(clip, agent); }
+      catch (error) {
+        clip.formatting = { ...clip.formatting, status: 'failed', stage: 'Formatting needs attention', error: error.message, updatedAt: new Date().toISOString() };
+        await persistClips().catch(() => {});
+        log(clip.agentId, 'error', 'Formatting worker stopped unexpectedly', error.message);
+      }
+    }
+  } finally { formattingWorkerRunning = false; }
+}
+async function formatClip(clip, agent) {
+  const sourcePath = path.join(CLIPS, clip.agentId, clip.filename);
+  const folder = path.join(CLIPS, clip.agentId, 'formatted');
+  const outputName = `${clip.id}-${(agent.outputAspectRatio || '9:16').replace(':', 'x')}.mp4`;
+  const outputPath = path.join(folder, outputName);
+  const partialPath = path.join(folder, `${clip.id}.partial.mp4`);
+  const formatting = clip.formatting || { status: 'queued', progress: 0 };
+  const setStage = async (stage, progress, extra = {}) => {
+    Object.assign(formatting, extra, { status: 'processing', stage, progress, updatedAt: new Date().toISOString() });
+    clip.formatting = formatting;
+    await persistClips();
+  };
+  formatting.status = 'processing'; clip.formatting = formatting;
+  try {
+    await fs.access(sourcePath);
+    await setStage('Checking source video', 5);
+    const inputInfo = await probeMedia(sourcePath);
+    const plan = formattingPlan(agent.outputAspectRatio, inputInfo.width, inputInfo.height);
+    formatting.inputInfo = inputInfo;
+    formatting.plan = plan;
+    formatting.aspectRatio = plan.aspectRatio;
+    formatting.outputFilename = outputName;
+    await setStage('Rendering upload format', 8, { inputInfo, plan, aspectRatio: plan.aspectRatio, outputFilename: outputName });
+    await fs.mkdir(folder, { recursive: true });
+    await fs.rm(partialPath, { force: true });
+    await fs.rm(outputPath, { force: true });
+    let lastProgressSave = 0;
+    await renderFormattedClip(sourcePath, partialPath, plan, {
+      onProgress: (percent) => {
+        formatting.progress = 8 + Math.round(percent * 0.86);
+        formatting.stage = `Rendering upload format · ${percent}%`;
+        formatting.updatedAt = new Date().toISOString();
+        if (Date.now() - lastProgressSave > 2500) {
+          lastProgressSave = Date.now();
+          void persistClips().catch((error) => log(clip.agentId, 'error', 'Could not save formatting progress', error.message));
+        }
+      }
+    });
+    await fs.rename(partialPath, outputPath);
+    await setStage('Checking rendered video', 96);
+    const outputInfo = await probeMedia(outputPath);
+    const dimensionsMatch = outputInfo.width === plan.width && outputInfo.height === plan.height;
+    const durationMatch = Math.abs(outputInfo.duration - inputInfo.duration) <= Math.max(1, inputInfo.duration * 0.01);
+    const audioPreserved = !inputInfo.hasAudio || outputInfo.hasAudio;
+    const qualityCheck = { passed: dimensionsMatch && durationMatch && audioPreserved, dimensionsMatch, durationMatch, audioPreserved, outputInfo };
+    if (!qualityCheck.passed) throw new Error('The output did not pass video, duration, or audio checks. Retry formatting after checking the source and FFmpeg installation.');
+    Object.assign(formatting, {
+      status: 'ready', stage: 'Ready for review', progress: 100, outputFilename: outputName,
+      outputInfo, qualityCheck, layout: plan.layout, explanation: plan.explanation,
+      completedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: ''
+    });
+    await persistClips();
+    log(clip.agentId, 'clip', 'Formatted clip ready for review', `${plan.aspectRatio} · ${plan.layout}`);
+  } catch (error) {
+    await fs.rm(partialPath, { force: true }).catch(() => {});
+    Object.assign(formatting, { status: 'failed', stage: 'Formatting needs attention', error: error.message, updatedAt: new Date().toISOString() });
+    await persistClips();
+    log(clip.agentId, 'error', 'Clip formatting failed', error.message);
+  }
+}
+async function retryFormatting(clipId) {
+  const clip = clips.find((item) => item.id === clipId);
+  if (!clip) throw new Error('Clip not found.');
+  if (clip.formatting?.status === 'processing') throw new Error('This clip is already being formatted.');
+  if (!clip.formatting || clip.formatting.status === 'ready') throw new Error('This clip does not need formatting retry.');
+  clip.formatting.status = 'queued'; clip.formatting.stage = 'Queued for retry'; clip.formatting.progress = 0; clip.formatting.error = '';
+  await persistClips();
+  enqueueFormatting(clip.id);
+  return clip;
 }
 
 function refreshHype(agent) {
@@ -279,6 +394,7 @@ const server = http.createServer(async (req, res) => {
       const body = await bodyJson(req);
       Object.assign(agent, {
         name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), sourceName: String(body.sourceName || '').slice(0, 100),
+        outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(body.outputAspectRatio) ? body.outputAspectRatio : agent.outputAspectRatio,
         twitchChannel: String(body.twitchChannel || '').replace(/^#/, '').slice(0, 60), youtubeLiveChatId: String(body.youtubeLiveChatId || '').slice(0, 200),
         autoSaveHype: Boolean(body.autoSaveHype), minMessages: Math.max(3, Math.min(100, Number(body.minMessages || 8))), windowSeconds: Math.max(5, Math.min(120, Number(body.windowSeconds || 20))),
         multiplier: Math.max(1.2, Math.min(10, Number(body.multiplier || 2.5))), cooldownSeconds: Math.max(20, Math.min(3600, Number(body.cooldownSeconds || 90))),
@@ -300,10 +416,18 @@ const server = http.createServer(async (req, res) => {
       }
       return send(res, 200, getState());
     }
-    if (req.method === 'GET' && url.pathname.startsWith('/api/clips/')) {
-      const id = url.pathname.split('/').at(-1); const clip = clips.find((item) => item.id === id);
+    const retryMatch = url.pathname.match(/^\/api\/clips\/([^/]+)\/retry-format$/);
+    if (req.method === 'POST' && retryMatch) {
+      const clip = await retryFormatting(decodeURIComponent(retryMatch[1]));
+      return send(res, 202, { clip });
+    }
+    const clipMatch = url.pathname.match(/^\/api\/clips\/([^/]+)(\/formatted)?$/);
+    if (req.method === 'GET' && clipMatch) {
+      const id = decodeURIComponent(clipMatch[1]); const clip = clips.find((item) => item.id === id);
       if (!clip) return send(res, 404, { error: 'Clip not found.' });
-      const file = path.join(CLIPS, clip.agentId, clip.filename);
+      if (clipMatch[2] && clip.formatting?.status !== 'ready') return send(res, 409, { error: 'Formatted clip is not ready yet.' });
+      const filename = clipMatch[2] ? clip.formatting.outputFilename : clip.filename;
+      const file = path.join(CLIPS, clip.agentId, ...(clipMatch[2] ? ['formatted', filename] : [filename]));
       if (!fsSync.existsSync(file)) return send(res, 404, { error: 'Clip file is missing.' });
       const ext = path.extname(file).toLowerCase();
       const contentType = ext === '.mp4' || ext === '.mov' ? 'video/mp4' : ext === '.webm' ? 'video/webm' : 'video/x-matroska';
@@ -316,7 +440,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(206, { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
         fsSync.createReadStream(file, { start, end }).pipe(res); return;
       }
-      res.writeHead(200, { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', ...(url.searchParams.has('download') ? { 'Content-Disposition': `attachment; filename="${clip.filename}"` } : {}), 'Content-Length': size });
+      res.writeHead(200, { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', ...(url.searchParams.has('download') ? { 'Content-Disposition': `attachment; filename="${filename}"` } : {}), 'Content-Length': size });
       fsSync.createReadStream(file).pipe(res); return;
     }
     if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, { 'Content-Type': mime['.html'] }); fsSync.createReadStream(path.join(ROOT, 'index.html')).pipe(res); return; }
@@ -327,6 +451,9 @@ const server = http.createServer(async (req, res) => {
 
 restartTwitch();
 for (const agent of agents) if (agent.enabled) void youtubePoll(agent);
+for (const clip of clips) {
+  if (['queued', 'processing'].includes(clip.formatting?.status)) enqueueFormatting(clip.id);
+}
 setInterval(async () => {
   for (const agent of agents) {
     const rt = runtime.get(agent.id);

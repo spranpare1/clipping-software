@@ -10,7 +10,10 @@ The primary project in this repository is now **Stream Clipper**: a local-first 
 - YouTube Live chat reading through the official Live Chat Messages API, honoring the API's returned polling interval.
 - Explainable moment score combines Twitch/YouTube chat bursts, repeated vote replies, emote/high-energy spam, YouTube poll events, and (when configured) sustained OBS audio peaks. Overlapping independent signals raise the score. Automatic saving is opt-in per agent; a global stop cancels pending saves for all agents.
 - Each agent targets roughly 180 seconds and delays saves by 20 seconds by default to include reaction context. Set that agent's OBS Replay Buffer to the configured duration; saves wait the post-trigger setting before asking OBS to write the rolling buffer.
-- Server keeps running when the browser tab closes. Clips and configuration are stored in this directory.
+- Every saved replay enters a persistent, single-worker formatting queue. FFmpeg creates an MP4 in the selected output ratio; ffprobe checks the rendered dimensions, duration, and audio. The original is preserved, and formatted outputs appear under `clips/<agent-id>/formatted/`.
+- The automatic layout keeps the entire source visible over a blurred background fill, so it never guesses a face or cuts off gameplay. It does not yet detect speakers, track subjects, recognize content types, or add captions.
+- Formatting continues when the browser tab closes. Queued or interrupted jobs resume when the service restarts. Failed jobs show the error and can be retried from the dashboard.
+- Clips and configuration are stored in this directory.
 - Browser shortcut `Ctrl+Shift+S` saves a replay for the first enabled, connected agent while the dashboard tab has focus.
 
 The shared criteria box stores the selection rules for all five agents. The implemented detector covers chat signals, YouTube poll events, and loud audio bursts from a named OBS input. Loudness is only an audio-intensity signal; it does not classify laughter, rage, exhaustion, or other emotions. Detecting streamer phrases such as “clip that,” spoken polls/questions, and emotional speech requires a live speech-to-text source, which is not connected yet. Visual event recognition, context-aware trimming, captions, editing, and social publishing are also not implemented. The first publishing workflow will be review-first; the publishing panel is intentionally marked unavailable until official account integrations are built.
@@ -21,14 +24,14 @@ The shared criteria box stores the selection rules for all five agents. The impl
 - **Capture and rolling buffer:** OBS Studio 28+ with its official obs-websocket protocol and Replay Buffer. Configure an OBS Browser Source or Window/Display Capture to show the stream. This captures the OBS scene, not a downloaded platform video file.
 - **Chat events:** Twitch secure IRC WebSocket (`chat:read`) and YouTube Live Chat Messages API (authorized bearer token and a broadcast `liveChatId`).
 - **Audio event signal:** OBS high-volume `InputVolumeMeters` events, filtered to the exact source name entered on that agent. The threshold is configurable in dBFS and is intended to find sustained loud bursts, not understand their meaning.
-- **Persistence:** Local JSON files in `data/` and media in `clips/`. Both are ignored by Git.
-- **Background work:** The Node service stays running after the browser closes. OBS maintains the rolling buffer. The process must remain running for chat automation; configure it to launch at login if you need unattended starts.
+- **Persistence:** Local JSON files in `data/` and media in `clips/`. Both are ignored by Git. Clip state updates use atomic file replacement.
+- **Background work:** The Node service stays running after the browser closes. OBS maintains the rolling buffer; a single FFmpeg worker formats clips sequentially to limit resource use. The process must remain running for chat monitoring and active rendering; interrupted formatting resumes when it is started again.
 
 Running five agents means running five OBS instances (or otherwise providing five separately addressable OBS WebSocket endpoints), each with a separate stream capture and Replay Buffer. This can be resource intensive. The actual buffer duration and disk consumption are controlled by OBS settings and the local disk. The app does not set an artificial source-video duration limit.
 
 ## Setup on Windows or macOS
 
-1. Install Node.js 22 or newer, OBS Studio 28 or newer, and Git.
+1. Install Node.js 22 or newer, OBS Studio 28 or newer, Git, and FFmpeg (including `ffprobe`). Make sure `ffmpeg` and `ffprobe` work from a new terminal, or set `FFMPEG_PATH` and `FFPROBE_PATH` in `.env` to their full paths. Windows builds are available from the FFmpeg download page; macOS users can install with Homebrew (`brew install ffmpeg`).
 2. Clone the repository and run commands from its root, or run `git pull` in an existing clone:
 
    ```powershell
@@ -75,7 +78,8 @@ Missing or expired credentials leave the provider disconnected and create an err
 
 - The OBS Replay Buffer duration determines how much footage is included before you trigger a save. The `preRollSeconds` value is stored as a workflow preference; this version does not change OBS's buffer duration. Configure OBS's Replay Buffer duration directly.
 - The browser shortcut works while the dashboard tab has focus. For a system-wide hotkey, use OBS's own **Save Replay** hotkey or add a native desktop tray wrapper in a later step.
-- Each save copies OBS's last replay file into `clips/<agent-id>/`. Free disk space is the limiting factor; clear old clips when needed.
+- Each save copies OBS's last replay file into `clips/<agent-id>/`, then creates a formatted MP4 in `clips/<agent-id>/formatted/`. The dashboard previews/downloads the formatted output and retains a download for the original. Free disk space is the limiting factor; clear old clips when needed.
+- Choose the output aspect ratio in each agent's settings. The first formatter supports 9:16, 1:1, 4:5, and 16:9, preserving the whole original frame with a blurred fill. It is not yet platform-specific validation and does not add captions or content-aware subject tracking.
 - Keep OBS and this local service running during an unattended session. The dashboard itself can close.
 - Chat and audio spike matching is heuristic and can produce false positives. Start with automatic saving off, review event logs, and tune each agent's message window and audio threshold before enabling it.
 - The current app captures the OBS scene. It does not bypass platform restrictions or fetch media from a stream URL. Use content you have the rights and account permission to capture.
@@ -85,6 +89,7 @@ Missing or expired credentials leave the provider disconnected and create an err
 - [OBS WebSocket protocol](https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md)
 - [Twitch Chat and Chatbots](https://dev.twitch.tv/docs/chat/)
 - [YouTube Live Chat Messages: list](https://developers.google.com/youtube/data/live/reference/rest/v3/liveChatMessages/list)
+- [FFmpeg](https://ffmpeg.org/download.html)
 
 ## Publishing roadmap
 

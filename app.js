@@ -49,6 +49,7 @@ function render() {
         <div class="field full"><label>OBS PASSWORD <span style="color:#5d6877">(session only)</span></label><input name="password" type="password" placeholder="Leave blank if no password" autocomplete="new-password"></div>
         <div class="field"><label>CLIP LENGTH · SECONDS</label><input name="clipDurationSeconds" type="number" min="150" max="210" value="${agent.clipDurationSeconds}"></div>
         <div class="field"><label>REACTION TAIL · SECONDS</label><input name="postRollSeconds" type="number" min="5" max="60" value="${agent.postRollSeconds}"></div>
+        <div class="field"><label>AUTO FORMAT · ASPECT RATIO</label><select name="outputAspectRatio">${['9:16', '1:1', '4:5', '16:9'].map((ratio) => `<option value="${ratio}" ${agent.outputAspectRatio === ratio ? 'selected' : ''}>${ratio}</option>`).join('')}</select></div>
         <div class="field"><label>TWITCH CHAT CHANNEL</label><input name="twitchChannel" value="${escapeHtml(agent.twitchChannel)}" placeholder="channelname"></div>
         <div class="field"><label>YOUTUBE LIVE CHAT ID</label><input name="youtubeLiveChatId" value="${escapeHtml(agent.youtubeLiveChatId)}" placeholder="Requires Google OAuth token"></div>
         <div class="field"><label>OBS STREAM AUDIO SOURCE</label><input name="audioInputName" value="${escapeHtml(agent.audioInputName)}" placeholder="e.g. Desktop Audio"></div>
@@ -59,7 +60,7 @@ function render() {
       </div>
       <div class="agent-actions"><button class="button primary mini" data-action="save-settings">Save settings</button><button class="button secondary mini" data-action="connect">${connected ? 'Reconnect OBS' : 'Connect OBS'}</button><button class="button secondary mini" data-action="save-clip" ${connected && agent.obs.replayBufferActive ? '' : 'disabled'}>● Save replay</button><label class="auto-check"><input name="enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Agent enabled</label><span class="replay-indicator">${agent.clips.length} saved</span></div>
       ${agent.obs.error ? `<p class="microcopy" style="color:#f2a5a0">${escapeHtml(agent.obs.error)}</p>` : ''}
-      <p class="microcopy">Uses chat spikes, polls, and peaks from the named OBS audio source (often Desktop Audio or Browser Source audio). Set OBS Replay Buffer to ${agent.clipDurationSeconds}s; saves wait ${agent.postRollSeconds}s after a trigger. It suppresses overlapping auto-clips for one clip window. Spoken requests, streamer questions, and emotion labels need live transcription.</p>
+      <p class="microcopy">Uses chat spikes, polls, and peaks from the named OBS audio source (often Desktop Audio or Browser Source audio). Set OBS Replay Buffer to ${agent.clipDurationSeconds}s; saves wait ${agent.postRollSeconds}s after a trigger. New replays render to ${escapeHtml(agent.outputAspectRatio)} with the whole frame visible over a blurred fill. It suppresses overlapping auto-clips for one clip window. Spoken requests, streamer questions, and emotion labels need live transcription.</p>
       ${events ? `<div class="agent-events">${events}</div>` : ''}
     </article>`;
   }).join('');
@@ -72,9 +73,18 @@ function render() {
     }
   }
   clipsEl.innerHTML = allClips.length ? allClips.slice(0, 18).map((clip) => {
-    const previewable = /\.(mp4|webm|mov)$/i.test(clip.filename);
-    const preview = previewable ? `<video class="clip-preview" controls preload="metadata" src="/api/clips/${encodeURIComponent(clip.id)}#t=0.5"></video>` : `<div class="clip-visual">◉<span class="clip-duration">DOWNLOAD TO PREVIEW</span></div>`;
-    return `<article class="clip-card">${preview}<div class="clip-info"><b>${escapeHtml(clip.agentName)} · ${escapeHtml(clip.source)}</b><p>${escapeHtml(clip.reason)}</p><div class="clip-meta"><span>${timeAgo(clip.createdAt)} · ${formatBytes(clip.bytes)}</span><a href="/api/clips/${encodeURIComponent(clip.id)}?download=1">Download ↓</a></div></div></article>`;
+    const formatted = clip.formatting?.status === 'ready';
+    const previewable = formatted || /\.(mp4|webm|mov)$/i.test(clip.filename);
+    const previewUrl = `/api/clips/${encodeURIComponent(clip.id)}${formatted ? '/formatted' : ''}`;
+    const preview = previewable ? `<video class="clip-preview" controls preload="metadata" src="${previewUrl}#t=0.5"></video>` : `<div class="clip-visual">◉<span class="clip-duration">DOWNLOAD ORIGINAL TO PREVIEW</span></div>`;
+    const status = clip.formatting || { status: 'original', stage: 'Original replay saved', progress: 0 };
+    const progress = status.status === 'processing' ? `<div class="format-progress"><div><i style="width:${Math.max(2, status.progress || 0)}%"></i></div><span>${status.progress || 0}%</span></div>` : '';
+    const formatError = status.status === 'failed' ? `<p class="format-error">${escapeHtml(status.error || 'Formatting failed.')}</p>` : '';
+    const formatLink = formatted ? `<a href="${previewUrl}?download=1">Download formatted ↓</a>` : `<a href="/api/clips/${encodeURIComponent(clip.id)}?download=1">Download original ↓</a>`;
+    const originalLink = formatted ? `<a class="quiet-link" href="/api/clips/${encodeURIComponent(clip.id)}?download=1">Original</a>` : '';
+    const retry = status.status === 'failed' ? `<button class="link-button" data-retry-format="${escapeHtml(clip.id)}">Retry format</button>` : '';
+    const explanation = status.explanation || 'The original replay is preserved.';
+    return `<article class="clip-card">${preview}<div class="clip-info"><b>${escapeHtml(clip.agentName)} · ${escapeHtml(clip.source)}</b><p>${escapeHtml(clip.reason)}</p><div class="format-status ${status.status}"><span>${escapeHtml(status.stage || 'Original replay')}</span>${status.aspectRatio ? ` · ${escapeHtml(status.aspectRatio)}` : ''}</div>${progress}${formatError}<p class="format-explanation">${escapeHtml(explanation)}</p><div class="clip-meta"><span>${timeAgo(clip.createdAt)} · ${formatBytes(clip.bytes)}</span>${formatLink}${originalLink}${retry}</div></div></article>`;
   }).join('') : '<div class="empty-state">No replays saved yet. Connect an agent to OBS and use “Save replay”.</div>';
 }
 function formatBytes(bytes = 0) { if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
@@ -85,7 +95,7 @@ function values(card) {
     password: get('password').value, twitchChannel: get('twitchChannel').value,
     youtubeLiveChatId: get('youtubeLiveChatId').value, windowSeconds: get('windowSeconds').value,
     minMessages: get('minMessages').value, clipDurationSeconds: get('clipDurationSeconds').value, postRollSeconds: get('postRollSeconds').value,
-    audioInputName: get('audioInputName').value, audioPeakDb: get('audioPeakDb').value,
+    audioInputName: get('audioInputName').value, audioPeakDb: get('audioPeakDb').value, outputAspectRatio: get('outputAspectRatio').value,
     autoSaveHype: get('autoSaveHype').checked, enabled: get('enabled').checked,
     multiplier: appState.agents.find((agent) => agent.id === card.dataset.agent).multiplier,
     cooldownSeconds: appState.agents.find((agent) => agent.id === card.dataset.agent).cooldownSeconds,
@@ -139,6 +149,16 @@ grid.addEventListener('click', async (event) => {
       await refresh(); notify('Replay copied to this agent’s clip folder.');
     }
   } catch (error) { notify(error.message, true); await refresh(); }
+  finally { button.disabled = false; }
+});
+clipsEl.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-retry-format]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await request(`/api/clips/${encodeURIComponent(button.dataset.retryFormat)}/retry-format`, { method: 'POST', body: '{}' });
+    await refresh(); notify('Formatting queued. It will continue in the background.');
+  } catch (error) { notify(error.message, true); }
   finally { button.disabled = false; }
 });
 document.querySelector('#stop-all').addEventListener('click', async () => {

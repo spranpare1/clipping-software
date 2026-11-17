@@ -7,6 +7,7 @@ Stream Clipper is now the primary app in the repository root. The earlier Splice
 ## Added
 
 - Dashboard for up to five streamer agents, each with its own OBS connection, chat source, settings, logs, and saved clips; all agents share one criteria profile.
+- Resumable background formatting queue that preserves original replays, creates MP4 outputs in a chosen aspect ratio with a full-frame blurred-fill layout, verifies output metadata, and supports retry from the dashboard.
 - OBS Replay Buffer integration for rolling capture, manual replay saves, downloads, previews for browser-compatible files, and OBS reconnect handling.
 - Optional Twitch chat monitoring and YouTube Live chat monitoring using authorized credentials.
 - Moment scoring for chat bursts, repeated vote replies, emote/high-energy spam, YouTube poll events, and sustained loudness peaks from a configured OBS audio source. Overlapping signals increase the score.
