@@ -4,6 +4,7 @@ const toast = document.querySelector('#toast');
 let appState = null;
 let toastTimer;
 const dirtyForms = new Map();
+const obsPasswordDrafts = new Map();
 let sharedCriteriaDirty = false;
 const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const timeAgo = (iso) => {
@@ -46,7 +47,7 @@ function render() {
         <div class="field"><label>STREAM / SOURCE LABEL</label><input name="sourceName" value="${escapeHtml(agent.sourceName)}" placeholder="Twitch channel / stream"></div>
         <div class="field"><label>OBS HOST</label><input name="host" value="${escapeHtml(agent.obsHost)}" placeholder="127.0.0.1"></div>
         <div class="field"><label>OBS WEBSOCKET PORT</label><input name="port" type="number" value="${agent.obsPort}" min="1" max="65535"></div>
-        <div class="field full"><label>OBS PASSWORD <span style="color:#5d6877">(session only)</span></label><input name="password" type="password" placeholder="Leave blank if no password" autocomplete="new-password"></div>
+        <div class="field full"><label>OBS PASSWORD <span style="color:#5d6877">(session only)</span></label><input name="obsSessionSecret" type="password" value="${escapeHtml(obsPasswordDrafts.get(agent.id) || '')}" placeholder="Leave blank if no password" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div>
         <div class="field"><label>CLIP LENGTH · SECONDS</label><input name="clipDurationSeconds" type="number" min="150" max="210" value="${agent.clipDurationSeconds}"></div>
         <div class="field"><label>REACTION TAIL · SECONDS</label><input name="postRollSeconds" type="number" min="5" max="60" value="${agent.postRollSeconds}"></div>
         <div class="field"><label>AUTO FORMAT · ASPECT RATIO</label><select name="outputAspectRatio">${['9:16', '1:1', '4:5', '16:9'].map((ratio) => `<option value="${ratio}" ${agent.outputAspectRatio === ratio ? 'selected' : ''}>${ratio}</option>`).join('')}</select></div>
@@ -93,7 +94,7 @@ function values(card) {
   const get = (name) => card.querySelector(`[name="${name}"]`);
   return {
     name: get('name').value, sourceName: get('sourceName').value, host: get('host').value, port: get('port').value,
-    password: get('password').value, twitchChannel: get('twitchChannel').value,
+    password: get('obsSessionSecret').value, twitchChannel: get('twitchChannel').value,
     youtubeLiveChatId: get('youtubeLiveChatId').value, windowSeconds: get('windowSeconds').value,
     minMessages: get('minMessages').value, clipDurationSeconds: get('clipDurationSeconds').value, postRollSeconds: get('postRollSeconds').value,
     audioInputName: get('audioInputName').value, audioPeakDb: get('audioPeakDb').value, outputAspectRatio: get('outputAspectRatio').value,
@@ -106,15 +107,20 @@ function values(card) {
 }
 async function saveSettings(card) {
   const body = values(card);
-  await request(`/api/agents/${card.dataset.agent}/settings`, { method: 'PUT', body: JSON.stringify(body) });
+  const settings = { ...body };
+  delete settings.password;
+  await request(`/api/agents/${card.dataset.agent}/settings`, { method: 'PUT', body: JSON.stringify(settings) });
   dirtyForms.delete(card.dataset.agent);
-  if (body.password) card.querySelector('[name="password"]').value = '';
   await refresh();
 }
 function rememberForm(event) {
   const field = event.target.closest('[name]');
   const card = field?.closest('.agent-card');
-  if (!field || !card || field.name === 'password') return;
+  if (!field || !card) return;
+  if (field.name === 'obsSessionSecret') {
+    obsPasswordDrafts.set(card.dataset.agent, field.value);
+    return;
+  }
   const current = dirtyForms.get(card.dataset.agent) || {};
   current[field.name] = field.type === 'checkbox' ? field.checked : field.value;
   dirtyForms.set(card.dataset.agent, current);
@@ -141,8 +147,10 @@ grid.addEventListener('click', async (event) => {
     if (action === 'save-settings') { await saveSettings(card); notify('Agent settings saved.'); }
     if (action === 'connect') {
       const data = values(card);
-      await request(`/api/agents/${id}/settings`, { method: 'PUT', body: JSON.stringify(data) });
-      await request(`/api/agents/${id}/connect`, { method: 'POST', body: JSON.stringify({ host: data.host, port: data.port, password: data.password || undefined }) });
+      const { password, ...settings } = data;
+      await request(`/api/agents/${id}/settings`, { method: 'PUT', body: JSON.stringify(settings) });
+      await request(`/api/agents/${id}/connect`, { method: 'POST', body: JSON.stringify({ host: data.host, port: data.port, password: password || undefined }) });
+      obsPasswordDrafts.delete(id);
       dirtyForms.delete(id);
       await refresh(); notify('OBS connected. Replay Buffer is ready.');
     }
