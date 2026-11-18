@@ -435,6 +435,8 @@ const server = http.createServer(async (req, res) => {
       const body = await bodyJson(req);
       Object.assign(agent, {
         name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), sourceName: String(body.sourceName || '').slice(0, 100),
+        obsHost: String(body.host || agent.obsHost || '127.0.0.1').trim().slice(0, 255),
+        obsPort: Number.isInteger(Number(body.port)) && Number(body.port) >= 1 && Number(body.port) <= 65535 ? Number(body.port) : agent.obsPort,
         outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(body.outputAspectRatio) ? body.outputAspectRatio : agent.outputAspectRatio,
         speechMonitoringEnabled: Boolean(body.speechMonitoringEnabled), speechAudioDevice: String(body.speechAudioDevice || '').slice(0, 200),
         twitchChannel: String(body.twitchChannel || '').replace(/^#/, '').slice(0, 60), youtubeLiveChatId: String(body.youtubeLiveChatId || '').slice(0, 200),

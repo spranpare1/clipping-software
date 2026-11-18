@@ -139,6 +139,11 @@ document.querySelector('#save-criteria').addEventListener('click', async (event)
   } catch (error) { notify(error.message, true); }
   finally { button.disabled = false; }
 });
+async function persistSharedCriteriaIfDirty() {
+  if (!sharedCriteriaDirty) return;
+  await request('/api/criteria', { method: 'PUT', body: JSON.stringify({ criteria: document.querySelector('#shared-criteria').value }) });
+  sharedCriteriaDirty = false;
+}
 grid.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]'); if (!button) return;
   const card = button.closest('.agent-card'); const action = button.dataset.action; const id = card.dataset.agent;
@@ -146,6 +151,7 @@ grid.addEventListener('click', async (event) => {
   try {
     if (action === 'save-settings') { await saveSettings(card); notify('Agent settings saved.'); }
     if (action === 'connect') {
+      await persistSharedCriteriaIfDirty();
       const data = values(card);
       const { password, ...settings } = data;
       await request(`/api/agents/${id}/settings`, { method: 'PUT', body: JSON.stringify(settings) });
