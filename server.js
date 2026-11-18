@@ -23,9 +23,11 @@ if (fsSync.existsSync(path.join(ROOT, '.env'))) {
 }
 const CONFIG_PATH = path.join(DATA, 'agents.json');
 const CLIPS_PATH = path.join(DATA, 'clips.json');
-const DEFAULT_CRITERIA = 'Target about 3 minutes. Include buildup, the main event, and the streamer/chat reaction. Prioritize streamer clip requests, polls and audience decisions, strong emotional reactions, chat spikes, emote spam, and repeated messages. Capture context and complete dialogue. Give extra priority when multiple independent signals overlap.';
+const DEFAULT_CRITERIA = 'Target about 3 minutes. Across any game or stream topic, prioritize funny, surprising, chaotic, impressive, or highly engaging moments. Capture enough buildup to explain what happened, the main moment, and the streamer/chat reaction. Look for clip requests, polls and audience decisions, fails, clutch plays, unexpected bugs, wild reactions, and moments where multiple signals overlap.';
+const DEFAULT_PRIORITY_TERMS = 'clip that, chat clip this, that was hilarious, what just happened, no way, that was close, nice clutch, huge fail, unexpected, funny bug, NPC moment, jump scare, unbelievable, lets go';
+const LEGACY_DEFAULT_CRITERIA = 'Target about 3 minutes. Include buildup, the main event, and the streamer/chat reaction. Prioritize streamer clip requests, polls and audience decisions, strong emotional reactions, chat spikes, emote spam, and repeated messages. Capture context and complete dialogue. Give extra priority when multiple independent signals overlap.';
 const defaultAgents = Array.from({ length: 5 }, (_, i) => ({
-  id: `agent-${i + 1}`, name: `Clipper ${i + 1}`, enabled: i === 0, criteria: DEFAULT_CRITERIA, sourceName: '', obsHost: i === 0 ? (process.env.OBS_HOST || '127.0.0.1') : '127.0.0.1', obsPort: i === 0 ? Number(process.env.OBS_PORT || 4455) : 4455 + i,
+  id: `agent-${i + 1}`, name: `Clipper ${i + 1}`, enabled: i === 0, criteria: DEFAULT_CRITERIA, priorityTerms: DEFAULT_PRIORITY_TERMS, sourceName: '', obsHost: i === 0 ? (process.env.OBS_HOST || '127.0.0.1') : '127.0.0.1', obsPort: i === 0 ? Number(process.env.OBS_PORT || 4455) : 4455 + i,
   twitchChannel: '', youtubeLiveChatId: '', autoSaveHype: false, minMessages: 8, windowSeconds: 20, multiplier: 2.5, cooldownSeconds: 90,
   clipDurationSeconds: 180, postRollSeconds: 20, audioInputName: '', audioPeakDb: -8, outputAspectRatio: '9:16', speechMonitoringEnabled: false, speechAudioDevice: ''
 }));
@@ -35,10 +37,10 @@ try {
   const savedAgents = JSON.parse(await fs.readFile(CONFIG_PATH, 'utf8'));
   agents = defaultAgents.map((defaults) => {
     const saved = savedAgents.find((item) => item.id === defaults.id) || {};
-    return { ...defaults, ...saved, criteria: saved.criteria?.trim() ? saved.criteria : defaults.criteria };
+    const criteria = saved.criteria?.trim() && saved.criteria !== LEGACY_DEFAULT_CRITERIA ? saved.criteria : defaults.criteria;
+    return { ...defaults, ...saved, criteria, priorityTerms: saved.priorityTerms || defaults.priorityTerms };
   });
-  const sharedCriteria = agents[0]?.criteria || DEFAULT_CRITERIA;
-  agents = agents.map((agent) => ({ ...agent, criteria: sharedCriteria, outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(agent.outputAspectRatio) ? agent.outputAspectRatio : '9:16' }));
+  agents = agents.map((agent) => ({ ...agent, outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(agent.outputAspectRatio) ? agent.outputAspectRatio : '9:16' }));
 } catch {}
 try { clips = JSON.parse(await fs.readFile(CLIPS_PATH, 'utf8')); } catch {}
 const runtime = new Map();
@@ -92,17 +94,27 @@ function recordSignal(agent, { type, source, reason }, at = Date.now()) {
   return score;
 }
 function ingestChat(agent, { id, user, text, at = Date.now() }) {
+  const gameCue = findPriorityCue(agent, text);
+  if (gameCue) recordSignal(agent, { type: 'priority_event', source: 'chat', reason: `Priority event phrase in chat: “${gameCue}”.` }, at);
   const signal = runtime.get(agent.id).hype.add({ id, user, text, at });
   if (!signal) return;
   log(agent.id, 'signal', 'Chat activity spike detected', signal.reason);
   for (const type of signal.triggerTypes) recordSignal(agent, { type, source: 'chat', reason: signal.reason }, at);
 }
 function handleSpeechTranscript(agent, { text, at }) {
+  const gameCue = findPriorityCue(agent, text);
+  if (gameCue) recordSignal(agent, { type: 'priority_event', source: 'speech', reason: `Priority event phrase spoken: “${gameCue}”.` }, at);
   const cues = detectSpeechCues(text);
   for (const cue of cues) {
     log(agent.id, 'signal', cue.reason, 'Detected in the live audio transcript.');
     recordSignal(agent, { type: cue.type, source: 'speech', reason: cue.reason }, at);
   }
+}
+function findPriorityCue(agent, text) {
+  const normalize = (value) => String(value || '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const content = normalize(text);
+  const terms = String(agent.priorityTerms || '').split(/[,;\n]/).map((term) => term.trim()).filter((term) => normalize(term).length >= 3);
+  return terms.find((term) => content.includes(normalize(term))) || '';
 }
 async function configureSpeech(agent) {
   const rt = runtime.get(agent.id);
@@ -407,7 +419,7 @@ function getState() {
       const rt = runtime.get(agent.id);
       const items = clips.filter((clip) => clip.agentId === agent.id);
       return { ...agent, obs: rt.obsInfo, speech: rt.speechStatus, isSaving: rt.isSaving, clips: items, events: rt.events, chat: { twitch: rt.twitchStatus, youtube: rt.youtubeStatus },
-        capabilities: { capture: 'OBS Replay Buffer captures the scene configured for this OBS instance.', criteria: 'Chat spikes, configured OBS loudness peaks, and optional speech phrase cues are detected. Speech reaction phrases are heuristic, not vocal emotion recognition.', visualDetection: 'Not enabled in this build.' } };
+        capabilities: { capture: 'Each agent can connect to a separate OBS endpoint and run at the same time as the other four agents.', criteria: 'Per-agent priority phrases in live chat or speech can trigger clips. Other triggers include chat spikes, polls, loudness, and optional speech cues. Phrase matching is simple text matching, not AI event recognition.', visualDetection: 'Not enabled in this build.' } };
     }), maxAgents: 5, publishing: { status: 'not_configured', note: 'Official upload integrations are not implemented yet. No publishing is simulated.' }
   };
 }
@@ -420,14 +432,6 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   try {
     if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, getState());
-    if (req.method === 'PUT' && url.pathname === '/api/criteria') {
-      const body = await bodyJson(req);
-      const criteria = String(body.criteria ?? '').slice(0, 2000);
-      agents = agents.map((agent) => ({ ...agent, criteria }));
-      await persist();
-      for (const agent of agents) log(agent.id, 'system', 'Shared clip criteria updated', 'This profile applies to every agent.');
-      return send(res, 200, getState());
-    }
     const previewMatch = url.pathname.match(/^\/api\/agents\/(agent-[1-5])\/preview$/);
     if (req.method === 'GET' && previewMatch) {
       const rt = runtime.get(previewMatch[1]);
@@ -458,6 +462,7 @@ const server = http.createServer(async (req, res) => {
       const body = await bodyJson(req);
       Object.assign(agent, {
         name: String(body.name || agent.name).slice(0, 80), enabled: Boolean(body.enabled), sourceName: String(body.sourceName || '').slice(0, 100),
+        criteria: String(body.criteria ?? agent.criteria ?? DEFAULT_CRITERIA).slice(0, 2000), priorityTerms: String(body.priorityTerms ?? agent.priorityTerms ?? DEFAULT_PRIORITY_TERMS).slice(0, 1000),
         obsHost: String(body.host || agent.obsHost || '127.0.0.1').trim().slice(0, 255),
         obsPort: Number.isInteger(Number(body.port)) && Number(body.port) >= 1 && Number(body.port) <= 65535 ? Number(body.port) : agent.obsPort,
         outputAspectRatio: ['9:16', '1:1', '4:5', '16:9'].includes(body.outputAspectRatio) ? body.outputAspectRatio : agent.outputAspectRatio,

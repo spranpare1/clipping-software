@@ -1,6 +1,6 @@
 # Stream Clipper: simple Windows setup
 
-This guide gets one agent running and helps you check that it can save and format a clip. Start with manual clipping. Add speech and chat triggers after that works.
+This guide gets an agent running and helps you check that it can save and format a clip. Set up each stream on its own agent card; you can run as many as five at once.
 
 ## What the app does
 
@@ -45,9 +45,11 @@ If you already cloned the repo, go to its folder and run `git pull` before `npm 
 ## 3. Set up OBS for one stream
 
 1. Add a source to an OBS scene. For example, add a Browser Source or Window Capture showing your stream. Check that you can see and hear it in OBS.
-2. In OBS, open **Settings → Output → Replay Buffer**, enable it, and set the duration to **180 seconds**. The app’s default clip length is about three minutes.
+2. In OBS, open **Settings → Output → Replay Buffer**, enable it, and set the duration to **180 seconds**. The app’s default clip length is about three minutes. For multiple streams, use a separate OBS instance and WebSocket port for each agent.
 3. In OBS, open **Tools → WebSocket Server Settings**. Enable the server, keep the default port `4455`, and set a password.
-4. In the Stream Clipper agent card, enter that OBS password and click **Connect OBS**. The card should show that the Replay Buffer is ready, display a preview of the current OBS Program scene, and turn on automatic moment saves.
+4. In the matching Stream Clipper agent card, enter that OBS password, set the stream label, review its clip criteria and priority phrases, then click **Connect OBS**. The card should show that the Replay Buffer is ready, display a preview of the current OBS Program scene, and turn on automatic moment saves. Repeat with another card and OBS instance for each additional stream.
+
+The default profile looks for funny, surprising, chaotic, impressive, or highly engaging moments across games and stream topics. Each creator can have a different criteria brief and event phrase list; add game-specific phrases such as GTA 6 missions or police chases to the agents watching those streams. A matching phrase in live chat or speech can trigger a save. This is simple text matching, not AI understanding of the video. Chat spikes and configured loud audio can also trigger clips.
 
 OBS’s guide explains the Replay Buffer and save controls: [OBS Studio overview](https://obsproject.com/kb/OBS-Studio-Overview). Audio monitoring is covered in the [OBS Audio Mixer guide](https://obsproject.com/kb/audio-mixer-guide).
 

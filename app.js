@@ -5,7 +5,6 @@ let appState = null;
 let toastTimer;
 const dirtyForms = new Map();
 const obsPasswordDrafts = new Map();
-let sharedCriteriaDirty = false;
 const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const timeAgo = (iso) => {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -30,11 +29,10 @@ async function refresh() {
 }
 function render() {
   if (!appState) return;
-  const active = appState.agents.filter((agent) => agent.enabled).length;
-  document.querySelector('#agents-running').textContent = `${active} of 5 agents enabled`;
+  const active = appState.agents.filter((agent) => agent.obs.connected && agent.obs.replayBufferActive).length;
+  document.querySelector('#agents-running').textContent = `${active} of 5 connected`;
   const allClips = appState.agents.flatMap((agent) => agent.clips.map((clip) => ({ ...clip, agentName: agent.name }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   document.querySelector('#clip-count').textContent = `${allClips.length} clip${allClips.length === 1 ? '' : 's'}`;
-  if (!sharedCriteriaDirty) document.querySelector('#shared-criteria').value = appState.agents[0]?.criteria || '';
   grid.innerHTML = appState.agents.map((agent, index) => {
     const connected = agent.obs.connected;
     const status = connected ? (agent.obs.replayBufferActive ? 'BUFFER READY' : 'BUFFER OFF') : (agent.obs.error ? 'NEEDS ATTENTION' : (agent.enabled ? 'NOT CONNECTED' : 'PAUSED'));
@@ -49,6 +47,8 @@ function render() {
       <div class="agent-body">
         <div class="field"><label>AGENT NAME</label><input name="name" value="${escapeHtml(agent.name)}" maxlength="80"></div>
         <div class="field"><label>STREAM / SOURCE LABEL</label><input name="sourceName" value="${escapeHtml(agent.sourceName)}" placeholder="Twitch channel / stream"></div>
+        <div class="field full"><label>THIS AGENT’S CLIP CRITERIA</label><textarea name="criteria" rows="3" maxlength="2000">${escapeHtml(agent.criteria || '')}</textarea><p class="microcopy">Saved separately for this stream. Automatic detection uses the event phrases below plus chat spikes, spoken clip requests, polls, and loud audio. It does not understand arbitrary instructions as an AI.</p></div>
+        <div class="field full"><label>PRIORITY EVENT PHRASES · COMMA SEPARATED</label><textarea name="priorityTerms" rows="2" maxlength="1000">${escapeHtml(agent.priorityTerms || '')}</textarea><p class="microcopy">A matching phrase in live chat or speech can trigger a clip. These are simple phrase matches; add or remove terms for this creator.</p></div>
         <div class="field"><label>OBS HOST</label><input name="host" value="${escapeHtml(agent.obsHost)}" placeholder="127.0.0.1"></div>
         <div class="field"><label>OBS WEBSOCKET PORT</label><input name="port" type="number" value="${agent.obsPort}" min="1" max="65535"></div>
         <div class="field full"><label>OBS PASSWORD <span style="color:#5d6877">(session only)</span></label><input name="obsSessionSecret" type="password" value="${escapeHtml(obsPasswordDrafts.get(agent.id) || '')}" placeholder="Leave blank if no password" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div>
@@ -116,7 +116,8 @@ function values(card) {
     autoSaveHype: get('autoSaveHype').checked, enabled: get('enabled').checked,
     multiplier: appState.agents.find((agent) => agent.id === card.dataset.agent).multiplier,
     cooldownSeconds: appState.agents.find((agent) => agent.id === card.dataset.agent).cooldownSeconds,
-    preRollSeconds: appState.agents.find((agent) => agent.id === card.dataset.agent).preRollSeconds
+    preRollSeconds: appState.agents.find((agent) => agent.id === card.dataset.agent).preRollSeconds,
+    criteria: get('criteria').value, priorityTerms: get('priorityTerms').value
   };
 }
 async function saveSettings(card) {
@@ -141,23 +142,6 @@ function rememberForm(event) {
 }
 grid.addEventListener('input', rememberForm);
 grid.addEventListener('change', rememberForm);
-document.querySelector('#shared-criteria').addEventListener('input', () => { sharedCriteriaDirty = true; });
-document.querySelector('#save-criteria').addEventListener('click', async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    await request('/api/criteria', { method: 'PUT', body: JSON.stringify({ criteria: document.querySelector('#shared-criteria').value }) });
-    sharedCriteriaDirty = false;
-    await refresh();
-    notify('Shared criteria applied to all five agents.');
-  } catch (error) { notify(error.message, true); }
-  finally { button.disabled = false; }
-});
-async function persistSharedCriteriaIfDirty() {
-  if (!sharedCriteriaDirty) return;
-  await request('/api/criteria', { method: 'PUT', body: JSON.stringify({ criteria: document.querySelector('#shared-criteria').value }) });
-  sharedCriteriaDirty = false;
-}
 grid.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]'); if (!button) return;
   const card = button.closest('.agent-card'); const action = button.dataset.action; const id = card.dataset.agent;
@@ -165,7 +149,6 @@ grid.addEventListener('click', async (event) => {
   try {
     if (action === 'save-settings') { await saveSettings(card); notify('Agent settings saved.'); }
     if (action === 'connect') {
-      await persistSharedCriteriaIfDirty();
       const data = values(card);
       const { password, ...settings } = data;
       await request(`/api/agents/${id}/settings`, { method: 'PUT', body: JSON.stringify(settings) });

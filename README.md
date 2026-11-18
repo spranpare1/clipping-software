@@ -6,7 +6,7 @@ The primary project in this repository is now **Stream Clipper**: a local-first 
 
 ## Current implementation
 
-- Five persistent agent slots with per-agent stream labels, chat configuration, replay settings, and activity history. All agents use one shared clip-criteria profile; edit it once in the dashboard to update all five.
+- Five persistent agent slots can connect to separate OBS endpoints at the same time. Each has its own stream label, chat configuration, replay settings, clip brief, priority phrases, and activity history.
 - OBS WebSocket connection, Replay Buffer start/status, manual replay save, download, and reconnect after an OBS restart or dropped connection.
 - Each connected agent shows an automatic preview of OBS's current Program scene, refreshed every few seconds so you can confirm the right stream is on screen.
 - Twitch chat reading over Twitch's secure IRC WebSocket using a user OAuth token with `chat:read`.
@@ -21,7 +21,7 @@ The primary project in this repository is now **Stream Clipper**: a local-first 
 - Clips and configuration are stored in this directory.
 - Browser shortcut `Ctrl+Shift+S` saves a replay for the first enabled, connected agent while the dashboard tab has focus.
 
-The shared criteria box stores the selection rules for all five agents. The implemented detector covers chat signals, YouTube poll events, loud audio bursts, and opt-in speech phrase cues. Loudness and text patterns do not reliably classify laughter, rage, exhaustion, or vocal emotion. Visual event recognition, speaker/face tracking, caption generation, editing, and social publishing are not implemented. The first publishing workflow will be review-first; the publishing panel is intentionally marked unavailable until official account integrations are built.
+Each agent's criteria brief and priority phrases are stored separately. Priority phrases in live chat or speech can trigger a clip, alongside chat spikes, YouTube poll events, loud audio bursts, and opt-in speech cues. Phrase matching is literal text matching; the app does not interpret arbitrary criteria or recognize events on screen. The default profile targets funny, surprising, chaotic, impressive, and highly engaging moments across games and stream topics. Add GTA 6-specific phrases to the relevant agents if desired. Loudness and text patterns do not reliably classify laughter, rage, exhaustion, or vocal emotion. Visual event recognition, speaker/face tracking, caption generation, editing, and social publishing are not implemented. The first publishing workflow will be review-first; the publishing panel is intentionally marked unavailable until official account integrations are built.
 
 ## Architecture
 
@@ -64,7 +64,7 @@ Running five agents means running five OBS instances (or otherwise providing fiv
    npm start
    ```
 
-7. Open <http://127.0.0.1:4179>, set each agent's source and chat source, enter the shared clip criteria once, then connect the agents to OBS. The password entered in the page is kept only in the running process; environment variables are better for unattended use (`OBS_PASSWORD_AGENT_1`, etc.).
+7. Open <http://127.0.0.1:4179>, configure a separate source label, clip brief, and priority phrases on each agent card, then connect each card to its OBS endpoint. The password entered in the page is kept only in the running process; environment variables are better for unattended use (`OBS_PASSWORD_AGENT_1`, etc.).
 
 ### Optional live speech cues on Windows
 
