@@ -8,6 +8,7 @@ The primary project in this repository is now **Stream Clipper**: a local-first 
 
 - Five persistent agent slots with per-agent stream labels, chat configuration, replay settings, and activity history. All agents use one shared clip-criteria profile; edit it once in the dashboard to update all five.
 - OBS WebSocket connection, Replay Buffer start/status, manual replay save, download, and reconnect after an OBS restart or dropped connection.
+- Each connected agent shows an automatic preview of OBS's current Program scene, refreshed every few seconds so you can confirm the right stream is on screen.
 - Twitch chat reading over Twitch's secure IRC WebSocket using a user OAuth token with `chat:read`.
 - YouTube Live chat reading through the official Live Chat Messages API, honoring the API's returned polling interval.
 - Explainable moment score combines Twitch/YouTube chat bursts, repeated vote replies, emote/high-energy spam, YouTube poll events, and (when configured) sustained OBS audio peaks. Overlapping independent signals raise the score. Automatic saving is opt-in per agent; a global stop cancels pending saves for all agents.

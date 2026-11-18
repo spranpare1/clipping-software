@@ -420,6 +420,21 @@ const server = http.createServer(async (req, res) => {
       for (const agent of agents) log(agent.id, 'system', 'Shared clip criteria updated', 'This profile applies to every agent.');
       return send(res, 200, getState());
     }
+    const previewMatch = url.pathname.match(/^\/api\/agents\/(agent-[1-5])\/preview$/);
+    if (req.method === 'GET' && previewMatch) {
+      const rt = runtime.get(previewMatch[1]);
+      if (!rt?.obs || !rt.obsInfo.connected) return send(res, 503, { error: 'Connect this agent to OBS to see its preview.' });
+      const scene = await rt.obs.request('GetCurrentProgramScene');
+      if (!scene.currentProgramSceneName) return send(res, 503, { error: 'OBS does not have a current program scene.' });
+      const screenshot = await rt.obs.request('GetSourceScreenshot', {
+        sourceName: scene.currentProgramSceneName, imageFormat: 'jpg', imageWidth: 640, imageCompressionQuality: 72
+      });
+      const image = String(screenshot.imageData || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if (!image) return send(res, 502, { error: 'OBS returned an unreadable scene preview.' });
+      res.writeHead(200, { 'Content-Type': image[1], 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(image[2], 'base64') });
+      res.end(Buffer.from(image[2], 'base64'));
+      return;
+    }
     const match = url.pathname.match(/^\/api\/agents\/(agent-[1-5])(?:\/(connect|disconnect|save))?$/);
     if (match) {
       const [, id, action] = match; const agent = agents.find((item) => item.id === id); const rt = runtime.get(id);

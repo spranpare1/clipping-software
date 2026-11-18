@@ -39,9 +39,13 @@ function render() {
     const connected = agent.obs.connected;
     const status = connected ? (agent.obs.replayBufferActive ? 'BUFFER READY' : 'BUFFER OFF') : (agent.obs.error ? 'NEEDS ATTENTION' : (agent.enabled ? 'NOT CONNECTED' : 'PAUSED'));
     const statusClass = connected && agent.obs.replayBufferActive ? 'ok' : '';
+    const obsPreview = connected
+      ? `<div class="obs-live-preview"><img src="/api/agents/${agent.id}/preview?t=${Date.now()}" alt="Current OBS program preview"><span>OBS preview · refreshes every few seconds</span></div>`
+      : '<div class="obs-live-preview unavailable"><span>Connect OBS to show its current program here.</span></div>';
     const events = agent.events.slice(0, 2).map((event) => `<div class="event-row"><time>${timeAgo(event.at)}</time><div><b>${escapeHtml(event.message)}</b>${event.detail ? ` · ${escapeHtml(event.detail)}` : ''}</div></div>`).join('');
     return `<article class="agent-card ${agent.enabled ? '' : 'disabled'}" data-agent="${agent.id}">
       <div class="agent-top"><div class="agent-id"><div class="agent-orb">0${index + 1}</div><div><h3>${escapeHtml(agent.name)}</h3><span>${escapeHtml(agent.sourceName || 'No source label')} · OBS ${escapeHtml(agent.obsHost)}:${agent.obsPort}</span></div></div><div class="agent-status ${statusClass}"><i></i>${status}</div></div>
+      ${obsPreview}
       <div class="agent-body">
         <div class="field"><label>AGENT NAME</label><input name="name" value="${escapeHtml(agent.name)}" maxlength="80"></div>
         <div class="field"><label>STREAM / SOURCE LABEL</label><input name="sourceName" value="${escapeHtml(agent.sourceName)}" placeholder="Twitch channel / stream"></div>
@@ -66,6 +70,16 @@ function render() {
       ${events ? `<div class="agent-events">${events}</div>` : ''}
     </article>`;
   }).join('');
+  for (const image of grid.querySelectorAll('.obs-live-preview img')) {
+    image.addEventListener('error', () => {
+      const preview = image.parentElement;
+      image.remove();
+      preview.classList.add('unavailable');
+      const message = document.createElement('span');
+      message.textContent = 'OBS preview unavailable. Check the OBS WebSocket connection.';
+      preview.append(message);
+    }, { once: true });
+  }
   for (const [id, fields] of dirtyForms) {
     const card = grid.querySelector(`[data-agent="${id}"]`);
     if (!card) continue;

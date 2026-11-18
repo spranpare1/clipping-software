@@ -47,7 +47,7 @@ If you already cloned the repo, go to its folder and run `git pull` before `npm 
 1. Add a source to an OBS scene. For example, add a Browser Source or Window Capture showing your stream. Check that you can see and hear it in OBS.
 2. In OBS, open **Settings → Output → Replay Buffer**, enable it, and set the duration to **180 seconds**. The app’s default clip length is about three minutes.
 3. In OBS, open **Tools → WebSocket Server Settings**. Enable the server, keep the default port `4455`, and set a password.
-4. In the Stream Clipper agent card, enter that OBS password and click **Connect OBS**. The card should show that the Replay Buffer is ready.
+4. In the Stream Clipper agent card, enter that OBS password and click **Connect OBS**. The card should show that the Replay Buffer is ready and display a preview of the current OBS Program scene.
 
 OBS’s guide explains the Replay Buffer and save controls: [OBS Studio overview](https://obsproject.com/kb/OBS-Studio-Overview). Audio monitoring is covered in the [OBS Audio Mixer guide](https://obsproject.com/kb/audio-mixer-guide).
 
