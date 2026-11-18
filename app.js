@@ -62,7 +62,7 @@ function render() {
         <div class="field full"><label>LIVE SPEECH · ${escapeHtml(agent.speech?.state || 'stopped').toUpperCase()}</label><label class="auto-check"><input name="speechMonitoringEnabled" type="checkbox" ${agent.speechMonitoringEnabled ? 'checked' : ''}> Listen for spoken clip requests and chat questions</label><input name="speechAudioDevice" value="${escapeHtml(agent.speechAudioDevice || '')}" placeholder="DirectShow device name carrying OBS audio"><p class="microcopy">Requires a virtual audio cable: route OBS Monitor output to it, then enter the cable’s capture device name. Speech is sent to the configured transcription provider if hosted; short audio windows are deleted after processing.</p><p class="microcopy">${escapeHtml(agent.speech?.message || 'Configure a speech provider and audio device to activate live transcription.')}</p></div>
         <div class="field"><label>SPIKE WINDOW · SECONDS</label><input name="windowSeconds" type="number" min="5" max="120" value="${agent.windowSeconds}"></div>
         <div class="field"><label>MESSAGES TO TRIGGER</label><input name="minMessages" type="number" min="3" max="100" value="${agent.minMessages}"></div>
-        <div class="field full"><label>AUTOMATIC MOMENT SAVES</label><label class="auto-check"><input name="autoSaveHype" type="checkbox" ${agent.autoSaveHype ? 'checked' : ''}> Save when chat, speech, or audio cues overlap <span style="color:#697587">· Twitch ${escapeHtml(agent.chat.twitch)} / YouTube ${escapeHtml(agent.chat.youtube)}</span></label></div>
+        <div class="field full"><label>AUTOMATIC MOMENT SAVES</label><label class="auto-check"><input name="autoSaveHype" type="checkbox" ${agent.autoSaveHype ? 'checked' : ''}> Save on qualifying chat, speech, or audio triggers <span style="color:#697587">· Twitch ${escapeHtml(agent.chat.twitch)} / YouTube ${escapeHtml(agent.chat.youtube)}</span></label></div>
       </div>
       <div class="agent-actions"><button class="button primary mini" data-action="save-settings">Save settings</button><button class="button secondary mini" data-action="connect">${connected ? 'Reconnect OBS' : 'Connect OBS'}</button><button class="button secondary mini" data-action="save-clip" ${connected && agent.obs.replayBufferActive ? '' : 'disabled'}>● Save replay</button><label class="auto-check"><input name="enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Agent enabled</label><span class="replay-indicator">${agent.clips.length} saved</span></div>
       ${agent.obs.error ? `<p class="microcopy" style="color:#f2a5a0">${escapeHtml(agent.obs.error)}</p>` : ''}
@@ -169,10 +169,10 @@ grid.addEventListener('click', async (event) => {
       const data = values(card);
       const { password, ...settings } = data;
       await request(`/api/agents/${id}/settings`, { method: 'PUT', body: JSON.stringify(settings) });
-      await request(`/api/agents/${id}/connect`, { method: 'POST', body: JSON.stringify({ host: data.host, port: data.port, password: password || undefined }) });
+      await request(`/api/agents/${id}/connect`, { method: 'POST', body: JSON.stringify({ host: data.host, port: data.port, password: password || undefined, autoStart: true }) });
       obsPasswordDrafts.delete(id);
       dirtyForms.delete(id);
-      await refresh(); notify('OBS connected. Replay Buffer is ready.');
+      await refresh(); notify('OBS connected. Replay Buffer and automatic moment saves are on.');
     }
     if (action === 'save-clip') {
       await request(`/api/agents/${id}/save`, { method: 'POST', body: JSON.stringify({ reason: 'Manual save' }) });

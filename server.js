@@ -386,7 +386,15 @@ async function connectAgent(agent, body = {}) {
       try { await rt.obs.request('StartReplayBuffer'); rt.obsInfo.replayBufferActive = true; }
       catch (error) { rt.obsInfo.error = `Connected, but OBS Replay Buffer could not start: ${error.message}`; }
     }
+    if (body.autoStart === true) {
+      agent.enabled = true;
+      agent.autoSaveHype = true;
+    }
     agent.obsHost = host; agent.obsPort = port; await persist();
+    refreshHype(agent);
+    restartTwitch();
+    clearTimeout(rt.youtubeTimer); void youtubePoll(agent);
+    await configureSpeech(agent);
     rt.shouldReconnect = true;
     log(agent.id, 'system', 'Connected to OBS', `${host}:${port}`);
   } catch (error) { rt.obsInfo.error = error.message; throw error; }

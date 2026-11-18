@@ -47,7 +47,7 @@ If you already cloned the repo, go to its folder and run `git pull` before `npm 
 1. Add a source to an OBS scene. For example, add a Browser Source or Window Capture showing your stream. Check that you can see and hear it in OBS.
 2. In OBS, open **Settings → Output → Replay Buffer**, enable it, and set the duration to **180 seconds**. The app’s default clip length is about three minutes.
 3. In OBS, open **Tools → WebSocket Server Settings**. Enable the server, keep the default port `4455`, and set a password.
-4. In the Stream Clipper agent card, enter that OBS password and click **Connect OBS**. The card should show that the Replay Buffer is ready and display a preview of the current OBS Program scene.
+4. In the Stream Clipper agent card, enter that OBS password and click **Connect OBS**. The card should show that the Replay Buffer is ready, display a preview of the current OBS Program scene, and turn on automatic moment saves.
 
 OBS’s guide explains the Replay Buffer and save controls: [OBS Studio overview](https://obsproject.com/kb/OBS-Studio-Overview). Audio monitoring is covered in the [OBS Audio Mixer guide](https://obsproject.com/kb/audio-mixer-guide).
 
@@ -58,7 +58,7 @@ OBS’s guide explains the Replay Buffer and save controls: [OBS Studio overview
 3. Click **Save replay**.
 4. In **Clip library**, wait for the status to move from queued/rendering to **Ready for review**. The video preview should show the formatted version. Use **Download formatted** to save it; **Original** downloads OBS’s untouched replay.
 
-This test does not need Twitch credentials, a speech API key, or automatic saves. It only needs OBS, FFmpeg, and the app.
+This manual test needs no Twitch credentials or speech API key. Connecting enables automatic saves, but they only produce extra clips when a configured chat, audio, or speech trigger is detected. Turn off **Automatic moment saves** if you want to test only with the **Save replay** button.
 
 ## 5. Optional: detect spoken clip requests
 
@@ -104,8 +104,8 @@ After changing `.env`, stop and restart Stream Clipper. In the dashboard:
 1. Enter the DirectShow device name.
 2. Check **Listen for spoken clip requests and chat questions**.
 3. Click **Save settings** and wait for the speech status to say it is listening.
-4. First leave **Automatic moment saves** unchecked. Say “Chat, clip that” into the audio being monitored and check the activity log for a spoken clip request. This confirms transcription without automatically saving clips.
-5. If that works, check **Automatic moment saves** and repeat. The agent should save a replay after the configured reaction delay. Make sure the Replay Buffer has already filled.
+4. Turn off **Automatic moment saves** temporarily. Say “Chat, clip that” into the audio being monitored and check the activity log for a spoken clip request. This confirms transcription without saving a clip.
+5. Turn **Automatic moment saves** back on and repeat. The agent should save a replay after the configured reaction delay. Make sure the Replay Buffer has already filled.
 
 When Automatic moment saves is off, speech cues are only logged. When it is on, speech cues can save replays. Detection works on short audio windows, so expect a delay. Phrase cues and loudness are not reliable emotion recognition; this version does not identify faces, gameplay events, or visual reactions.
 
